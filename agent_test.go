@@ -117,6 +117,10 @@ func TestAgentWithStructuredResponse(t *testing.T) {
 	schema := Schema{
 		Type: "object",
 		Properties: map[string]Schema{
+			"failure_reason": {
+				Type:        "string",
+				Description: "Reason for failure",
+			},
 			"answer": {
 				Type:        "string",
 				Description: "The answer to the user's question",
@@ -131,7 +135,7 @@ func TestAgentWithStructuredResponse(t *testing.T) {
 
 	agent.SetStructuredResponseSchema(schema)
 
-	structuredResponse, err := agent.Run(ctx, "What is the population of Tokyo?")
+	structuredResponse, err := agent.Run(ctx, "why is that sky is blue?")
 	fmt.Println(err)
 	if err != nil {
 		t.Fatalf("Agent.Run with structured output failed: %v", err)

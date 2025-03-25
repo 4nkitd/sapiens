@@ -17,6 +17,8 @@ type LLMInterface interface {
 	// Initialize sets up the language model with provided options
 	Initialize() error
 
+	SetSystemPrompt(prompt SystemPrompt)
+
 	Generate(ctx context.Context, request *Request) (*Response, error)
 
 	// Complete generates a completion for the given prompt
@@ -41,12 +43,13 @@ type LLMInterface interface {
 
 // GoogleGenAI implements the LLMInterface for Google's Generative AI
 type GoogleGenAI struct {
-	Client      *genai.Client
-	Model       *genai.GenerativeModel
-	APIKey      string
-	ModelName   string
-	MaxTokens   int32
-	Temperature float32
+	Client       *genai.Client
+	SystemPrompt SystemPrompt
+	Model        *genai.GenerativeModel
+	APIKey       string
+	ModelName    string
+	MaxTokens    int32
+	Temperature  float32
 }
 
 // Generate implements LLMInterface.
@@ -115,6 +118,10 @@ func (g *GoogleGenAI) Complete(ctx context.Context, prompt string) (string, erro
 	return g.CompleteWithOptions(ctx, prompt, nil)
 }
 
+func (g *GoogleGenAI) SetSystemPrompt(prompt SystemPrompt) {
+	g.SystemPrompt = prompt
+}
+
 // CompleteWithOptions generates a completion with specific parameters
 func (g *GoogleGenAI) CompleteWithOptions(ctx context.Context, prompt string, options map[string]interface{}) (string, error) {
 	if g.Client == nil || g.Model == nil {
@@ -122,7 +129,7 @@ func (g *GoogleGenAI) CompleteWithOptions(ctx context.Context, prompt string, op
 	}
 
 	// Create a prompt for the model
-	genPrompt := []genai.Part{
+	inputParts := []genai.Part{
 		genai.Text(prompt),
 	}
 
@@ -140,8 +147,19 @@ func (g *GoogleGenAI) CompleteWithOptions(ctx context.Context, prompt string, op
 		g.Model.SetMaxOutputTokens(g.MaxTokens)
 	}
 
+	if g.SystemPrompt.Content != "" {
+		g.Model.SystemInstruction = &genai.Content{
+			Parts: []genai.Part{
+				genai.Text(g.SystemPrompt.Content),
+			},
+			Role: "system",
+		}
+	}
+
+	fmt.Println("Prompt:", prompt)
+
 	// Generate content
-	resp, err := g.Model.GenerateContent(ctx, genPrompt...)
+	resp, err := g.Model.GenerateContent(ctx, inputParts...)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %v", err)
 	}
@@ -170,6 +188,15 @@ func (g *GoogleGenAI) ChatCompletion(ctx context.Context, messages []Message) (R
 
 	for _, msg := range messages {
 		inputParts = append(inputParts, genai.Text(msg.Role+":"+msg.Content))
+	}
+
+	if g.SystemPrompt.Content != "" {
+		g.Model.SystemInstruction = &genai.Content{
+			Parts: []genai.Part{
+				genai.Text(g.SystemPrompt.Content),
+			},
+			Role: "system",
+		}
 	}
 
 	respGen := g.Model.GenerateContentStream(ctx, inputParts...)
@@ -283,6 +310,15 @@ func (g *GoogleGenAI) ChatCompletionWithTools(ctx context.Context, messages []Me
 		g.Model.SetMaxOutputTokens(g.MaxTokens)
 	}
 
+	if g.SystemPrompt.Content != "" {
+		g.Model.SystemInstruction = &genai.Content{
+			Parts: []genai.Part{
+				genai.Text(g.SystemPrompt.Content),
+			},
+			Role: "system",
+		}
+	}
+
 	// Generate content
 	resp, err := g.Model.GenerateContent(ctx, inputParts...)
 
@@ -299,6 +335,18 @@ func (g *GoogleGenAI) ChatCompletionWithTools(ctx context.Context, messages []Me
 		Raw: resp,
 	}
 
+	// Check if response contains a structured tool output
+	if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
+		if functionCall, ok := resp.Candidates[0].Content.Parts[0].(genai.FunctionCall); ok {
+			if functionCall.Name == "structured_output" {
+				// Handle structured output specially
+				response.Structured = functionCall.Args
+
+				return response, nil
+			}
+		}
+	}
+
 	// Extract content and potential tool calls
 	for _, part := range resp.Candidates[0].Content.Parts {
 		switch p := part.(type) {
@@ -309,6 +357,10 @@ func (g *GoogleGenAI) ChatCompletionWithTools(ctx context.Context, messages []Me
 				ID:       p.Name, // Using name as ID as genai might not provide explicit IDs
 				Name:     p.Name,
 				InputMap: p.Args,
+			}
+
+			if response.ToolCalls == nil {
+				response.ToolCalls = make([]ToolCall, 0)
 			}
 			response.ToolCalls = append(response.ToolCalls, toolCall)
 		}
@@ -327,6 +379,11 @@ func (g *GoogleGenAI) ChatCompletionWithToolsAndHandlers(ctx context.Context, me
 		return response, err
 	}
 
+	// return direct in case of structured_output response
+	if len(response.ToolCalls) == 1 && response.ToolCalls[0].Name == "structured_output" {
+		return response, nil
+	}
+
 	// If no tool calls or no handlers provided, return the response as is
 	if len(response.ToolCalls) == 0 || len(toolHandlers) == 0 {
 		return response, nil
@@ -335,6 +392,7 @@ func (g *GoogleGenAI) ChatCompletionWithToolsAndHandlers(ctx context.Context, me
 	// Process tool calls and collect results
 	toolResults := make([]Message, 0, len(response.ToolCalls))
 	for _, toolCall := range response.ToolCalls {
+
 		// Check if we have a handler for this tool
 		handler, exists := toolHandlers[toolCall.Name]
 		if !exists {
@@ -429,7 +487,14 @@ func (g *GoogleGenAI) StructuredOutput(ctx context.Context, messages []Message, 
 
 	// Append schema instruction to the last user message or add a new message
 	if len(modifiedMessages) > 0 && modifiedMessages[len(modifiedMessages)-1].Role == "user" {
-		modifiedMessages[len(modifiedMessages)-1].Content += "\n\n" + schemaInstruction
+
+		g.Model.SystemInstruction = &genai.Content{
+			Parts: []genai.Part{
+				genai.Text(g.SystemPrompt.Content + "\n\n" + schemaInstruction),
+			},
+			Role: "system",
+		}
+
 	} else {
 		modifiedMessages = append(modifiedMessages, Message{
 			Role:    "user",

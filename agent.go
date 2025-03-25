@@ -39,10 +39,13 @@ func (a *Agent) AddSystemPrompt(content string, version string) {
 		Version: version,
 	})
 
-	a.Messages = append(a.Messages, Message{
-		Role:    "system",
-		Content: content,
-	})
+	// a.Messages = append(a.Messages, Message{
+	// 	Role:    "system",
+	// 	Content: content,
+	// })
+
+	a.LLM.Implementation.SetSystemPrompt(a.GetLatestSystemPrompt())
+
 }
 
 // AddTools adds tools to the agent
@@ -53,6 +56,12 @@ func (a *Agent) AddTools(tools ...Tool) {
 // SetStructuredResponseSchema sets the schema for structured responses
 func (a *Agent) SetStructuredResponseSchema(schema Schema) {
 	a.StructuredResponseSchema = schema
+
+	a.Tools = append(a.Tools, Tool{
+		Name:        "structured_output",
+		Description: "Structured output tool",
+		InputSchema: &schema,
+	})
 }
 
 // RegisterToolImplementation registers a tool implementation function
@@ -88,6 +97,13 @@ func (a *Agent) getOptions() map[string]interface{} {
 		}
 	}
 	return options
+}
+
+func (a *Agent) GetLatestSystemPrompt() SystemPrompt {
+	if len(a.SystemPrompts) == 0 {
+		return SystemPrompt{}
+	}
+	return a.SystemPrompts[len(a.SystemPrompts)-1]
 }
 
 // executeWithTools processes a request with tool support
@@ -191,7 +207,7 @@ func (a *Agent) Run(ctx context.Context, query string) (*Response, error) {
 	}
 
 	// Process tool calls if present
-	if len(responsePtr.ToolCalls) > 0 {
+	if len(responsePtr.ToolCalls) > 0 && len(a.toolImplementations) > 0 {
 
 		fmt.Printf("Tool calls: %v\n", responsePtr)
 
