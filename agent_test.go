@@ -135,7 +135,7 @@ func TestAgentWithStructuredResponse(t *testing.T) {
 
 	agent.SetStructuredResponseSchema(schema)
 
-	structuredResponse, err := agent.Run(ctx, "why is that sky is blue?")
+	structuredResponse, err := agent.Run(ctx, "what is the population india")
 	fmt.Println(err)
 	if err != nil {
 		t.Fatalf("Agent.Run with structured output failed: %v", err)

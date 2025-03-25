@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // ToolImplementation is a function that handles tool calls
@@ -78,14 +79,42 @@ func (a *Agent) ExecuteLLM(ctx context.Context) (Response, error) {
 	// Create options from agent context
 	options := a.getOptions()
 
-	// Logic fork based on capabilities needed
-	if len(a.Tools) > 0 {
-		return a.executeWithTools(ctx, options)
-	} else if a.StructuredResponseSchema.Type != "" {
-		return a.executeWithStructure(ctx)
-	} else {
-		return a.LLM.Implementation.ChatCompletion(ctx, a.Messages)
+	// Implement retry logic
+	var response Response
+	var err error
+	var attempts int
+
+	for attempts = 0; attempts < a.MaxRetry; attempts++ {
+		// Logic fork based on capabilities needed
+		if len(a.Tools) > 0 {
+			response, err = a.executeWithTools(ctx, options)
+		} else if a.StructuredResponseSchema.Type != "" {
+			response, err = a.executeWithStructure(ctx)
+		} else {
+			response, err = a.LLM.Implementation.ChatCompletion(ctx, a.Messages)
+		}
+
+		if err == nil {
+			break // Success, exit retry loop
+		}
+
+		// Log retry attempt
+		fmt.Printf("LLM execution failed (attempt %d/%d): %v\n",
+			attempts+1, a.MaxRetry, err)
+
+		// Optional: Add backoff delay between retries
+		if attempts < a.MaxRetry-1 {
+			time.Sleep(time.Duration(500*(attempts+1)) * time.Millisecond)
+		}
 	}
+
+	// If all retries failed
+	if err != nil {
+		return Response{}, fmt.Errorf("LLM execution failed after %d attempts: %w",
+			attempts, err)
+	}
+
+	return response, nil
 }
 
 // getOptions extracts options from the agent context
@@ -108,9 +137,31 @@ func (a *Agent) GetLatestSystemPrompt() SystemPrompt {
 
 // executeWithTools processes a request with tool support
 func (a *Agent) executeWithTools(ctx context.Context, options map[string]interface{}) (Response, error) {
-	response, err := a.LLM.Implementation.ChatCompletionWithTools(ctx, a.Messages, a.Tools, options)
+	// Implement retry logic
+	var response Response
+	var err error
+	var attempts int
+
+	for attempts = 0; attempts < a.MaxRetry; attempts++ {
+		response, err = a.LLM.Implementation.ChatCompletionWithTools(ctx, a.Messages, a.Tools, options)
+		if err == nil {
+			break // Success, exit retry loop
+		}
+
+		// Log retry attempt
+		fmt.Printf("executeWithTools failed (attempt %d/%d): %v\n",
+			attempts+1, a.MaxRetry, err)
+
+		// Optional: Add backoff delay between retries
+		if attempts < a.MaxRetry-1 {
+			time.Sleep(time.Duration(500*(attempts+1)) * time.Millisecond)
+		}
+	}
+
+	// If all retries failed
 	if err != nil {
-		return Response{}, err
+		return Response{}, fmt.Errorf("executeWithTools failed after %d attempts: %w",
+			attempts, err)
 	}
 
 	// Add the assistant response to the message history
@@ -125,9 +176,31 @@ func (a *Agent) executeWithTools(ctx context.Context, options map[string]interfa
 
 // executeWithStructure processes a request with structured output
 func (a *Agent) executeWithStructure(ctx context.Context) (Response, error) {
-	response, err := a.LLM.Implementation.StructuredOutput(ctx, a.Messages, a.StructuredResponseSchema)
+	// Implement retry logic
+	var response Response
+	var err error
+	var attempts int
+
+	for attempts = 0; attempts < a.MaxRetry; attempts++ {
+		response, err = a.LLM.Implementation.StructuredOutput(ctx, a.Messages, a.StructuredResponseSchema)
+		if err == nil {
+			break // Success, exit retry loop
+		}
+
+		// Log retry attempt
+		fmt.Printf("executeWithStructure failed (attempt %d/%d): %v\n",
+			attempts+1, a.MaxRetry, err)
+
+		// Optional: Add backoff delay between retries
+		if attempts < a.MaxRetry-1 {
+			time.Sleep(time.Duration(500*(attempts+1)) * time.Millisecond)
+		}
+	}
+
+	// If all retries failed
 	if err != nil {
-		return Response{}, err
+		return Response{}, fmt.Errorf("executeWithStructure failed after %d attempts: %w",
+			attempts, err)
 	}
 
 	// Add the assistant response to the message history
@@ -181,7 +254,7 @@ func (a *Agent) HandleToolResponse(ctx context.Context, toolCallID string, toolN
 	return a.ExecuteLLM(ctx)
 }
 
-// Run processes a user query and returns a response at the end
+// Run processes a user query and returns a response with retry support
 func (a *Agent) Run(ctx context.Context, query string) (*Response, error) {
 	// Create the user message
 	userMessage := Message{
@@ -193,10 +266,32 @@ func (a *Agent) Run(ctx context.Context, query string) (*Response, error) {
 	a.conversationHistory = append(a.conversationHistory, userMessage)
 	a.Messages = append(a.Messages, userMessage)
 
-	// Process the request with ExecuteLLM
-	response, err := a.ExecuteLLM(ctx)
+	// Implement retry logic
+	var response Response
+	var err error
+	var attempts int
+
+	for attempts = 0; attempts < a.MaxRetry; attempts++ {
+		// Process the request with ExecuteLLM
+		response, err = a.ExecuteLLM(ctx)
+		if err == nil {
+			break // Success, exit retry loop
+		}
+
+		// Log retry attempt
+		fmt.Printf("LLM execution failed (attempt %d/%d): %v\n",
+			attempts+1, a.MaxRetry, err)
+
+		// Optional: Add backoff delay between retries
+		if attempts < a.MaxRetry-1 {
+			time.Sleep(time.Duration(500*(attempts+1)) * time.Millisecond)
+		}
+	}
+
+	// If all retries failed
 	if err != nil {
-		return nil, fmt.Errorf("LLM execution failed: %w", err)
+		return nil, fmt.Errorf("LLM execution failed after %d attempts: %w",
+			attempts, err)
 	}
 
 	// Convert Response to *Response
