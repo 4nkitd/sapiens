@@ -118,6 +118,7 @@ func (g *GoogleGenAI) Complete(ctx context.Context, prompt string) (string, erro
 	return g.CompleteWithOptions(ctx, prompt, nil)
 }
 
+// SetSystemPrompt sets the system prompt for the model
 func (g *GoogleGenAI) SetSystemPrompt(prompt SystemPrompt) {
 	g.SystemPrompt = prompt
 }
@@ -155,8 +156,6 @@ func (g *GoogleGenAI) CompleteWithOptions(ctx context.Context, prompt string, op
 			Role: "system",
 		}
 	}
-
-	fmt.Println("Prompt:", prompt)
 
 	// Generate content
 	resp, err := g.Model.GenerateContent(ctx, inputParts...)
@@ -239,6 +238,7 @@ func (g *GoogleGenAI) ChatCompletionWithTools(ctx context.Context, messages []Me
 	for _, msg := range messages {
 		inputParts = append(inputParts, genai.Text(msg.Role+":"+msg.Content))
 	}
+
 	// Create tool definitions for the model
 	var toolDefs []*genai.Tool
 	for _, tool := range tools {
@@ -341,7 +341,6 @@ func (g *GoogleGenAI) ChatCompletionWithTools(ctx context.Context, messages []Me
 			if functionCall.Name == "structured_output" {
 				// Handle structured output specially
 				response.Structured = functionCall.Args
-
 				return response, nil
 			}
 		}
@@ -392,7 +391,6 @@ func (g *GoogleGenAI) ChatCompletionWithToolsAndHandlers(ctx context.Context, me
 	// Process tool calls and collect results
 	toolResults := make([]Message, 0, len(response.ToolCalls))
 	for _, toolCall := range response.ToolCalls {
-
 		// Check if we have a handler for this tool
 		handler, exists := toolHandlers[toolCall.Name]
 		if !exists {
@@ -473,37 +471,39 @@ func (g *GoogleGenAI) StructuredOutput(ctx context.Context, messages []Message, 
 	}
 
 	// Add schema instruction to the last message or create a new one
-	var schemaInstruction string
-	schemaBytes, err := json.MarshalIndent(schema, "", "  ")
-	if err != nil {
-		return Response{}, fmt.Errorf("failed to marshal schema: %v", err)
-	}
+	// var schemaInstruction string
+	// schemaBytes, err := json.MarshalIndent(schema, "", "  ")
+	// if err != nil {
+	// 	return Response{}, fmt.Errorf("failed to marshal schema: %v", err)
+	// }
 
-	schemaInstruction = "Please provide a response that conforms to the following JSON schema:\n```json\n" +
-		string(schemaBytes) + "\n```\nYour response should be valid JSON that follows this schema."
+	// schemaInstruction = "Please provide a response that conforms to the following JSON schema:\n```json\n" +
+	// 	string(schemaBytes) + "\n```\nYour response should be valid JSON that follows this schema."
 
-	modifiedMessages := make([]Message, len(messages))
-	copy(modifiedMessages, messages)
+	// modifiedMessages := make([]Message, len(messages))
+	// copy(modifiedMessages, messages)
 
-	// Append schema instruction to the last user message or add a new message
-	if len(modifiedMessages) > 0 && modifiedMessages[len(modifiedMessages)-1].Role == "user" {
+	// // Append schema instruction to the last user message or add a new message
+	// if len(modifiedMessages) > 0 && modifiedMessages[len(modifiedMessages)-1].Role == "user" {
+	// 	g.Model.SystemInstruction = &genai.Content{
+	// 		Parts: []genai.Part{
+	// 			genai.Text(g.SystemPrompt.Content + "\n\n" + schemaInstruction),
+	// 		},
+	// 		Role: "system",
+	// 	}
+	// } else {
+	// 	modifiedMessages = append(modifiedMessages, Message{
+	// 		Role:    "user",
+	// 		Content: schemaInstruction,
+	// 	})
+	// }
 
-		g.Model.SystemInstruction = &genai.Content{
-			Parts: []genai.Part{
-				genai.Text(g.SystemPrompt.Content + "\n\n" + schemaInstruction),
-			},
-			Role: "system",
-		}
+	ConvertSchema, _ := schema.ConvertSchema(schema)
 
-	} else {
-		modifiedMessages = append(modifiedMessages, Message{
-			Role:    "user",
-			Content: schemaInstruction,
-		})
-	}
+	g.Model.ResponseSchema = ConvertSchema
 
 	// Get the completion
-	responseWithSchema, err := g.ChatCompletion(ctx, modifiedMessages)
+	responseWithSchema, err := g.ChatCompletion(ctx, messages)
 	if err != nil {
 		return Response{}, err
 	}

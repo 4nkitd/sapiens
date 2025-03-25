@@ -136,7 +136,7 @@ func TestAgentWithStructuredResponse(t *testing.T) {
 
 	agent.SetStructuredResponseSchema(schema)
 
-	structuredResponse, err := agent.Run(ctx, "what is the population india")
+	structuredResponse, err := agent.Run(ctx, "what is the population india?")
 	fmt.Println(err)
 	if err != nil {
 		t.Fatalf("Agent.Run with structured output failed: %v", err)
@@ -403,5 +403,290 @@ func TestAgentWithInitialContext(t *testing.T) {
 
 	if !containsSubstring(updatedResponse.Content, "Michael Chen") || !containsSubstring(updatedResponse.Content, "2023") {
 		t.Errorf("Expected response to mention 'Michael Chen' and '2023', but got: %s", updatedResponse.Content)
+	}
+}
+
+func TestAgentWithDynamicPrompt(t *testing.T) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping test: GEMINI_API_KEY environment variable not set")
+	}
+
+	// Create a new LLM implementation
+	llmImpl := NewGoogleGenAI(apiKey, "gemini-2.0-flash")
+	err := llmImpl.Initialize()
+	if err != nil {
+		t.Fatalf("Failed to initialize GoogleGenAI: %v", err)
+	}
+
+	// Create a new agent
+	agent := NewAgent("DynamicPromptAgent", llmImpl, apiKey, "gemini-2.0-flash", "google")
+
+	// Define a prompt template with placeholders for dynamic content
+	promptTemplate := `
+	You are a knowledgeable assistant specialized in {{field}} topics.
+	
+	When discussing {{topic}}, please keep these key points in mind:
+	{{#points}}
+	- {{.}}
+	{{/points}}
+	
+	{{#if examples}}
+	Here are some examples to consider:
+	{{#examples}}
+	* {{name}}: {{description}}
+	{{/examples}}
+	{{/if}}
+	
+	Today's focus is on {{focus}}.
+	`
+
+	// Create dynamic card data
+	cardData := map[string]interface{}{
+		"field": "technology",
+		"topic": "artificial intelligence",
+		"points": []string{
+			"Ethical considerations are important",
+			"Technology should be accessible to everyone",
+			"Privacy must be respected",
+		},
+		"examples": []map[string]string{
+			{"name": "Machine Learning", "description": "Training systems on data to make predictions"},
+			{"name": "Computer Vision", "description": "Enabling machines to interpret visual information"},
+			{"name": "Natural Language Processing", "description": "Helping computers understand human language"},
+		},
+		"focus": "developing responsible AI systems",
+	}
+
+	// Apply the dynamic card data to the prompt template
+	dynamicPrompt, err := ApplyTemplate(promptTemplate, cardData)
+	if err != nil {
+		t.Fatalf("Failed to apply template: %v", err)
+	}
+
+	// Add the dynamic prompt as the system prompt
+	agent.AddSystemPrompt(dynamicPrompt, "1.0")
+
+	// Test the agent with a relevant question
+	ctx := context.Background()
+	response, err := agent.Run(ctx, "What are the most important considerations when developing AI systems?")
+	if err != nil {
+		t.Fatalf("Agent.Run failed: %v", err)
+	}
+
+	t.Logf("Response: %s", response.Content)
+
+	// Verify the response contains relevant information from the dynamic prompt
+	expectedTerms := []string{"ethical", "accessibility", "privacy", "responsible"}
+
+	foundTerms := 0
+	for _, term := range expectedTerms {
+		if containsSubstring(response.Content, term) {
+			foundTerms++
+		}
+	}
+
+	// Assert that at least 2 of the expected terms are mentioned
+	if foundTerms < 2 {
+		t.Errorf("Expected response to mention at least 2 terms from %v, but found only %d terms",
+			expectedTerms, foundTerms)
+	}
+
+	// Test modifying the card data and updating the prompt
+	updatedCardData := map[string]interface{}{
+		"field": "technology",
+		"topic": "artificial intelligence",
+		"points": []string{
+			"AI should be explainable and transparent",
+			"Models should be regularly evaluated for bias",
+			"Human oversight is necessary for critical decisions",
+		},
+		"examples": []map[string]string{
+			{"name": "Healthcare AI", "description": "Using AI to improve patient outcomes"},
+			{"name": "Financial AI", "description": "AI systems for fraud detection and risk assessment"},
+		},
+		"focus": "ethical AI implementation strategies",
+	}
+
+	// Apply the updated card data
+	updatedPrompt, err := ApplyTemplate(promptTemplate, updatedCardData)
+	if err != nil {
+		t.Fatalf("Failed to apply updated template: %v", err)
+	}
+
+	// Update the system prompt with the new dynamic content
+	agent.AddSystemPrompt(updatedPrompt, "1.1")
+
+	// Test with a new question
+	updatedResponse, err := agent.Run(ctx, "How can we ensure AI systems make fair decisions?")
+	if err != nil {
+		t.Fatalf("Agent.Run with updated prompt failed: %v", err)
+	}
+
+	t.Logf("Updated Response: %s", updatedResponse.Content)
+
+	// Verify the response contains relevant information from the updated prompt
+	updatedExpectedTerms := []string{"transparent", "bias", "explainable", "oversight", "ethical"}
+
+	updatedFoundTerms := 0
+	for _, term := range updatedExpectedTerms {
+		if containsSubstring(updatedResponse.Content, term) {
+			updatedFoundTerms++
+		}
+	}
+
+	// Assert that at least 2 of the expected terms are mentioned
+	if updatedFoundTerms < 2 {
+		t.Errorf("Expected updated response to mention at least 2 terms from %v, but found only %d terms",
+			updatedExpectedTerms, updatedFoundTerms)
+	}
+}
+
+func TestAgentWithPromptManager(t *testing.T) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping test: GEMINI_API_KEY environment variable not set")
+	}
+
+	// Create a new LLM implementation
+	llmImpl := NewGoogleGenAI(apiKey, "gemini-2.0-flash")
+	err := llmImpl.Initialize()
+	if err != nil {
+		t.Fatalf("Failed to initialize GoogleGenAI: %v", err)
+	}
+
+	// Create a new agent
+	agent := NewAgent("PromptManagerAgent", llmImpl, apiKey, "gemini-2.0-flash", "google")
+
+	// Define a prompt template for a customer service agent
+	customerServiceTemplate := PromptTemplate{
+		Name: "customer_service",
+		Template: `
+		You are a {{tone}} customer service representative for {{company_name}}, a company that specializes in {{industry}}.
+
+		When helping customers:
+		{{#guidelines}}
+		- {{.}}
+		{{/guidelines}}
+
+		Company policies you must follow:
+		{{#policies}}
+		* {{.}}
+		{{/policies}}
+
+		Today's focus is on {{daily_focus}}.
+		`,
+		Description: "Template for customer service representative prompts",
+		Version:     "1.0",
+	}
+
+	// Add the template to the agent's prompt manager
+	err = agent.AddPromptTemplate(customerServiceTemplate)
+	if err != nil {
+		t.Fatalf("Failed to add prompt template: %v", err)
+	}
+
+	// Create a card with data for this prompt
+	cardData := map[string]interface{}{
+		"tone":         "friendly and helpful",
+		"company_name": "TechSupport Pro",
+		"industry":     "technical support for software products",
+		"guidelines": []string{
+			"Always greet the customer by name when provided",
+			"Use simple, non-technical language unless the customer demonstrates technical knowledge",
+			"Offer step-by-step guidance for resolving issues",
+			"Verify the solution worked before ending the conversation",
+		},
+		"policies": []string{
+			"Do not share customer data with third parties",
+			"Refunds can be processed within 30 days of purchase",
+			"Premium support is available for subscribers only",
+			"Service hours are 9AM to 6PM Monday through Friday",
+		},
+		"daily_focus": "reducing resolution time while maintaining customer satisfaction",
+	}
+
+	// Create a card using the template and data
+	card := NewCard("customer_service", cardData)
+
+	// Add the card as a system prompt
+	err = agent.AddDynamicPromptWithCard(card, "1.0")
+	if err != nil {
+		t.Fatalf("Failed to add dynamic prompt with card: %v", err)
+	}
+
+	// Test the agent with a customer service question
+	ctx := context.Background()
+	response, err := agent.Run(ctx, "Hi, I'm having trouble installing your software. It gets stuck at 75% and then shows an error about missing dependencies.")
+	if err != nil {
+		t.Fatalf("Agent.Run failed: %v", err)
+	}
+
+	t.Logf("Response: %s", response.Content)
+
+	// Verify the response is helpful and follows the guidelines
+	expectedTerms := []string{"install", "dependencies", "step", "resolution", "error"}
+
+	foundTerms := 0
+	for _, term := range expectedTerms {
+		if containsSubstring(response.Content, term) {
+			foundTerms++
+		}
+	}
+
+	if foundTerms < 3 {
+		t.Errorf("Expected response to mention at least 3 terms from %v, but found only %d terms",
+			expectedTerms, foundTerms)
+	}
+
+	// Test updating the card with new data
+	updatedCardData := map[string]interface{}{
+		"tone":         "professional and concise",
+		"company_name": "TechSupport Pro",
+		"industry":     "technical support for software products",
+		"guidelines": []string{
+			"Focus on efficiency and accurate solutions",
+			"Provide troubleshooting steps in numbered format",
+			"Include links to relevant documentation when possible",
+			"Recommend preventative measures to avoid future issues",
+		},
+		"policies": []string{
+			"Support ticket response times must be within 2 hours",
+			"Critical issues must be escalated to the technical team",
+			"All interactions must be documented in the customer record",
+		},
+		"daily_focus": "addressing installation and dependency-related issues",
+	}
+
+	// Create an updated card
+	updatedCard := NewCard("customer_service", updatedCardData)
+
+	// Update the system prompt with the new card
+	err = agent.AddDynamicPromptWithCard(updatedCard, "1.1")
+	if err != nil {
+		t.Fatalf("Failed to update dynamic prompt with card: %v", err)
+	}
+
+	// Test with a similar question to see if the response style changes
+	updatedResponse, err := agent.Run(ctx, "I'm still having issues with installing your software. Can you help?")
+	if err != nil {
+		t.Fatalf("Agent.Run with updated card failed: %v", err)
+	}
+
+	t.Logf("Updated Response: %s", updatedResponse.Content)
+
+	// Verify the response follows the updated guidelines
+	updatedExpectedTerms := []string{"1.", "2.", "documentation", "prevent", "installation"}
+
+	updatedFoundTerms := 0
+	for _, term := range updatedExpectedTerms {
+		if containsSubstring(updatedResponse.Content, term) {
+			updatedFoundTerms++
+		}
+	}
+
+	if updatedFoundTerms < 2 {
+		t.Errorf("Expected updated response to mention at least 2 terms from %v, but found only %d terms",
+			updatedExpectedTerms, updatedFoundTerms)
 	}
 }

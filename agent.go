@@ -11,8 +11,6 @@ import (
 // ToolImplementation is a function that handles tool calls
 type ToolImplementation func(params map[string]interface{}) (interface{}, error)
 
-// Agent represents an AI agent that can process queries and use tools
-
 // NewAgent creates a new agent instance
 func NewAgent(name string, llmImplementation LLMInterface, apiKey, model, provider string) *Agent {
 	return &Agent{
@@ -30,6 +28,7 @@ func NewAgent(name string, llmImplementation LLMInterface, apiKey, model, provid
 		MaxRetry:            3,
 		Context:             make(map[string]interface{}),
 		MetaData:            make(map[string]interface{}),
+		PromptManager:       NewPromptManager(),
 	}
 }
 
@@ -40,13 +39,43 @@ func (a *Agent) AddSystemPrompt(content string, version string) {
 		Version: version,
 	})
 
-	// a.Messages = append(a.Messages, Message{
-	// 	Role:    "system",
-	// 	Content: content,
-	// })
-
 	a.LLM.Implementation.SetSystemPrompt(a.GetLatestSystemPrompt())
+}
 
+// AddDynamicPrompt adds or updates a system prompt using a template and data
+func (a *Agent) AddDynamicPrompt(promptTemplate string, cardData map[string]interface{}, version string) error {
+	// Process the template with the card data
+	dynamicPrompt, err := ApplyTemplate(promptTemplate, cardData)
+	if err != nil {
+		return fmt.Errorf("failed to apply template: %w", err)
+	}
+
+	// Add the processed prompt as a system prompt
+	a.AddSystemPrompt(dynamicPrompt, version)
+	return nil
+}
+
+// AddDynamicPromptWithCard adds a system prompt using a card and the prompt manager
+func (a *Agent) AddDynamicPromptWithCard(card Card, version string) error {
+	// Render the prompt from the card
+	renderedPrompt, err := card.Render(a.PromptManager)
+	if err != nil {
+		return fmt.Errorf("failed to render prompt card: %w", err)
+	}
+
+	// Add the rendered prompt as a system prompt
+	a.AddSystemPrompt(renderedPrompt, version)
+	return nil
+}
+
+// AddPromptTemplate adds a new prompt template to the agent's prompt manager
+func (a *Agent) AddPromptTemplate(template PromptTemplate) error {
+	return a.PromptManager.AddTemplate(template)
+}
+
+// GetPromptTemplate retrieves a prompt template by name
+func (a *Agent) GetPromptTemplate(name string) (PromptTemplate, error) {
+	return a.PromptManager.GetTemplate(name)
 }
 
 // AddTools adds tools to the agent
@@ -54,6 +83,7 @@ func (a *Agent) AddTools(tools ...Tool) {
 	a.Tools = append(a.Tools, tools...)
 }
 
+// SetContext sets the context for the agent
 func (a *Agent) SetContext(context map[string]interface{}) {
 	a.Context = context
 }
@@ -93,6 +123,7 @@ func (a *Agent) InjectContextIntoConversation(contextString string) {
 	a.Messages = newMessages
 }
 
+// UpdateContext updates the context for the agent
 func (a *Agent) UpdateContext(context map[string]interface{}) {
 	a.Context = context
 }
@@ -180,6 +211,7 @@ func (a *Agent) getOptions() map[string]interface{} {
 	return options
 }
 
+// GetLatestSystemPrompt returns the most recent system prompt
 func (a *Agent) GetLatestSystemPrompt() SystemPrompt {
 	if len(a.SystemPrompts) == 0 {
 		return SystemPrompt{}
@@ -264,15 +296,14 @@ func (a *Agent) executeWithStructure(ctx context.Context) (Response, error) {
 	return response, nil
 }
 
-// executeWithToolsAndStructure processes a request with both tools and structured output
-// This is more complex and might require custom handling depending on the LLM
+// ExecuteWithToolsAndStructure processes a request with both tools and structured output
 func (a *Agent) ExecuteWithToolsAndStructure(ctx context.Context) (Response, error) {
 	// First, execute with tools
 	toolResponse, err := a.executeWithTools(ctx, a.getOptions())
 	if err != nil {
 		return Response{}, err
 	}
-	fmt.Println(toolResponse)
+
 	// If there are tool calls, handle them first
 	if len(toolResponse.ToolCalls) > 0 {
 		return toolResponse, nil
@@ -355,9 +386,6 @@ func (a *Agent) Run(ctx context.Context, query string) (*Response, error) {
 
 	// Process tool calls if present
 	if len(responsePtr.ToolCalls) > 0 && len(a.toolImplementations) > 0 {
-
-		fmt.Printf("Tool calls: %v\n", responsePtr)
-
 		return a.handleToolCalls(ctx, responsePtr)
 	}
 
@@ -368,15 +396,6 @@ func (a *Agent) Run(ctx context.Context, query string) (*Response, error) {
 	})
 
 	return responsePtr, nil
-}
-
-// Helper function to extract tool names for debugging
-func toolNames(tools []Tool) []string {
-	names := make([]string, len(tools))
-	for i, tool := range tools {
-		names[i] = tool.Name
-	}
-	return names
 }
 
 // handleToolCalls processes tool calls and continues the conversation
@@ -410,7 +429,7 @@ func (a *Agent) handleToolCalls(ctx context.Context, response *Response) (*Respo
 		// Also add to Messages for consistency
 		a.Messages = append(a.Messages, Message{
 			Role:    "function", // LLM interfaces typically use "function" role
-			Name:    getTooNameFromCallID(result.ToolCallID, response.ToolCalls),
+			Name:    getToolNameFromCallID(result.ToolCallID, response.ToolCalls),
 			Content: result.Result,
 			Options: map[string]interface{}{
 				"tool_call_id": result.ToolCallID,
@@ -460,12 +479,17 @@ func (a *Agent) executeTool(toolCall ToolCall) (ToolResult, error) {
 	}, nil
 }
 
-// getTooNameFromCallID finds the tool name for a given tool call ID
-func getTooNameFromCallID(callID string, calls []ToolCall) string {
+// getToolNameFromCallID finds the tool name for a given tool call ID
+func getToolNameFromCallID(callID string, calls []ToolCall) string {
 	for _, call := range calls {
 		if call.ID == callID {
 			return call.Name
 		}
 	}
 	return ""
+}
+
+// GetHistory returns the conversation history
+func (a *Agent) GetHistory() []Message {
+	return a.conversationHistory
 }

@@ -87,37 +87,21 @@ type Response struct {
 	Raw         interface{} `json:"raw,omitempty"`          // Raw response from the LLM
 }
 
-// // Agent represents an AI agent with specific capabilities and context.
+// Agent represents an AI agent that can process queries and use tools
 type Agent struct {
-	Name                     string                 `json:"name"`
-	SystemPrompts            []SystemPrompt         `json:"system_prompt"`
-	Tools                    []Tool                 `json:"tools"`
-	StructuredResponseSchema Schema                 `json:"structured_response_schema"`
-	Memory                   []Memory               `json:"memory"`
-	MaxRetry                 int                    `json:"max_retry"`
-	Context                  map[string]interface{} `json:"context"`
-	MetaData                 map[string]interface{} `json:"meta_data"`
-	LLM                      *LLM                   `json:"llm"`
-	Messages                 []Message              `json:"messages"`
+	Name                     string
+	LLM                      *LLM
+	SystemPrompts            []SystemPrompt
+	StructuredResponseSchema Schema
+	Tools                    []Tool
 	toolImplementations      map[string]ToolImplementation
+	Messages                 []Message
 	conversationHistory      []Message
+	MaxRetry                 int
+	Context                  map[string]interface{}
+	MetaData                 map[string]interface{}
+	PromptManager            *PromptManager
 }
-
-// type Agent struct {
-// 	Name                     string
-// 	LLM                      *LLM
-// 	APIKey                   string
-// 	Model                    string
-// 	Provider                 string
-// 	SystemPrompts            []SystemPrompt
-// 	Tools                    []Tool
-// 	StructuredResponseSchema *Schema
-// 	toolImplementations      map[string]ToolImplementation
-// 	conversationHistory      []Message
-// 	MaxRetry                 int
-// 	Context                  map[string]interface{}
-// 	MetaData                 map[string]interface{}
-// }
 
 // SystemPrompt represents a system prompt with content and version
 type SystemPrompt struct {

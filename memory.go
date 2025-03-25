@@ -8,6 +8,7 @@ import (
 	"github.com/patrickmn/go-cache"
 )
 
+// NewMemory creates a new memory instance
 func NewMemory(memoryType string, config map[string]interface{}) Memory {
 	return Memory{
 		Type:   memoryType,
@@ -16,14 +17,13 @@ func NewMemory(memoryType string, config map[string]interface{}) Memory {
 	}
 }
 
+// Add stores an item in memory with its embedding
 func (m *Memory) Add(key string, value interface{}, embedding Embedding) {
-
-	embedding1JSON, _ := json.Marshal(embedding)
-
-	m.Store.Set(key, embedding1JSON, cache.DefaultExpiration)
-
+	embeddingJSON, _ := json.Marshal(embedding)
+	m.Store.Set(key, embeddingJSON, cache.DefaultExpiration)
 }
 
+// Get retrieves an item from memory by key
 func (m *Memory) Get(key string) interface{} {
 	if x, found := m.Store.Get(key); found {
 		var embedding Embedding
@@ -33,18 +33,18 @@ func (m *Memory) Get(key string) interface{} {
 	return nil
 }
 
+// Remove deletes an item from memory by key
 func (m *Memory) Remove(key string) {
 	m.Store.Delete(key)
 }
 
+// Reset clears all items from memory
 func (m *Memory) Reset() {
 	m.Store.Flush()
 }
 
-// Function to calculate cosine similarity.
+// cosineSimilarity calculates similarity between two vectors
 func (m *Memory) cosineSimilarity(vec1, vec2 Vector) float32 {
-	// Implement cosine similarity calculation here.
-	// Example only, do not use in production.
 	sum := float32(0.0)
 	for i := 0; i < len(vec1); i++ {
 		sum += vec1[i] * vec2[i]
@@ -52,7 +52,7 @@ func (m *Memory) cosineSimilarity(vec1, vec2 Vector) float32 {
 	return sum
 }
 
-// Function to find similar embeddings ranked by similarity score.
+// Search finds similar embeddings ranked by similarity score
 func (m *Memory) Search(queryEmbedding Vector) []SimilarityResult {
 	var results []SimilarityResult
 
