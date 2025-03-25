@@ -161,7 +161,7 @@ func TestAgentWithToolImplementation(t *testing.T) {
 
 	// Create a new agent
 	agent := NewAgent("TestAgent", llmImpl, apiKey, "gemini-2.0-flash", "google")
-	agent.AddSystemPrompt("You are a helpful AI assistant that can use tools to provide accurate answers.", "1.0")
+	agent.AddSystemPrompt("You are a helpful AI assistant.", "1.0")
 
 	// Test with tools and implementation
 	weatherTool := Tool{
@@ -203,8 +203,10 @@ func TestAgentWithToolImplementation(t *testing.T) {
 			"location":    location,
 			"temperature": 22,
 			"unit":        unit,
-			"condition":   "Sunny",
+			"condition":   "Rainy",
 		}
+
+		fmt.Printf("Weather info: %v\n", weatherInfo)
 
 		return weatherInfo, nil
 	})

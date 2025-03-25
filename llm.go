@@ -206,8 +206,6 @@ func (g *GoogleGenAI) ChatCompletionWithTools(ctx context.Context, messages []Me
 		return Response{}, fmt.Errorf("GoogleGenAI client not initialized, call Initialize() first")
 	}
 
-	fmt.Printf("LLM Request - sapiens: %+v\n", messages)
-
 	// Convert sapiens messages to genai chat messages
 	var inputParts []genai.Part
 
@@ -300,8 +298,6 @@ func (g *GoogleGenAI) ChatCompletionWithTools(ctx context.Context, messages []Me
 	response := Response{
 		Raw: resp,
 	}
-
-	fmt.Printf("LLM Response - ai: %+v\n", resp.Candidates[0].Content.Parts)
 
 	// Extract content and potential tool calls
 	for _, part := range resp.Candidates[0].Content.Parts {

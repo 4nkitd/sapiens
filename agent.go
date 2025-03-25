@@ -125,7 +125,7 @@ func (a *Agent) executeWithStructure(ctx context.Context) (Response, error) {
 
 // executeWithToolsAndStructure processes a request with both tools and structured output
 // This is more complex and might require custom handling depending on the LLM
-func (a *Agent) executeWithToolsAndStructure(ctx context.Context) (Response, error) {
+func (a *Agent) ExecuteWithToolsAndStructure(ctx context.Context) (Response, error) {
 	// First, execute with tools
 	toolResponse, err := a.executeWithTools(ctx, a.getOptions())
 	if err != nil {
@@ -165,7 +165,7 @@ func (a *Agent) HandleToolResponse(ctx context.Context, toolCallID string, toolN
 	return a.ExecuteLLM(ctx)
 }
 
-// Run processes a user query and returns a response
+// Run processes a user query and returns a response at the end
 func (a *Agent) Run(ctx context.Context, query string) (*Response, error) {
 	// Create the user message
 	userMessage := Message{
@@ -192,6 +192,9 @@ func (a *Agent) Run(ctx context.Context, query string) (*Response, error) {
 
 	// Process tool calls if present
 	if len(responsePtr.ToolCalls) > 0 {
+
+		fmt.Printf("Tool calls: %v\n", responsePtr)
+
 		return a.handleToolCalls(ctx, responsePtr)
 	}
 
