@@ -54,6 +54,58 @@ func (a *Agent) AddTools(tools ...Tool) {
 	a.Tools = append(a.Tools, tools...)
 }
 
+func (a *Agent) SetContext(context map[string]interface{}) {
+	a.Context = context
+}
+
+// SetStringContext sets a string as context for the agent
+func (a *Agent) SetStringContext(contextString string) {
+	// Store in the context map
+	a.Context["context_information"] = contextString
+
+	// Also inject the context into the conversation
+	a.InjectContextIntoConversation(contextString)
+}
+
+// InjectContextIntoConversation adds the context as a system message in the conversation
+func (a *Agent) InjectContextIntoConversation(contextString string) {
+	contextMessage := Message{
+		Role:    "system",
+		Content: fmt.Sprintf("Here is important context information to use when answering questions:\n\n%s", contextString),
+	}
+
+	// Add to the beginning of messages after any system prompts
+	systemPromptCount := 0
+	for _, msg := range a.Messages {
+		if msg.Role == "system" {
+			systemPromptCount++
+		}
+	}
+
+	// Create a new messages slice with the context inserted after system prompts
+	newMessages := make([]Message, 0, len(a.Messages)+1)
+	newMessages = append(newMessages, a.Messages[:systemPromptCount]...)
+	newMessages = append(newMessages, contextMessage)
+	if systemPromptCount < len(a.Messages) {
+		newMessages = append(newMessages, a.Messages[systemPromptCount:]...)
+	}
+
+	a.Messages = newMessages
+}
+
+func (a *Agent) UpdateContext(context map[string]interface{}) {
+	a.Context = context
+}
+
+// UpdateStringContext updates the string context for the agent
+func (a *Agent) UpdateStringContext(contextString string) {
+	// Update in the context map
+	a.Context["context_information"] = contextString
+
+	// Also inject the updated context into the conversation
+	a.InjectContextIntoConversation(contextString)
+}
+
 // SetStructuredResponseSchema sets the schema for structured responses
 func (a *Agent) SetStructuredResponseSchema(schema Schema) {
 	a.StructuredResponseSchema = schema
