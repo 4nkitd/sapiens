@@ -168,15 +168,8 @@ func (g *GoogleGenAI) ChatCompletion(ctx context.Context, messages []Message) (R
 
 	var inputParts []genai.Part
 
-	// Convert sapiens messages to genai chat messages
-	var genaiMessages []*genai.Content
 	for _, msg := range messages {
-		content := &genai.Content{
-			Parts: []genai.Part{genai.Text(msg.Content)},
-			Role:  msg.Role,
-		}
-		inputParts = append(inputParts, genai.Text(msg.Content))
-		genaiMessages = append(genaiMessages, content)
+		inputParts = append(inputParts, genai.Text(msg.Role+":"+msg.Content))
 	}
 
 	respGen := g.Model.GenerateContentStream(ctx, inputParts...)
@@ -217,14 +210,9 @@ func (g *GoogleGenAI) ChatCompletionWithTools(ctx context.Context, messages []Me
 
 	// Convert sapiens messages to genai chat messages
 	var inputParts []genai.Part
-	var genaiMessages []*genai.Content
+
 	for _, msg := range messages {
-		content := &genai.Content{
-			Parts: []genai.Part{genai.Text(msg.Content)},
-			Role:  msg.Role,
-		}
-		inputParts = append(inputParts, genai.Text(msg.Content))
-		genaiMessages = append(genaiMessages, content)
+		inputParts = append(inputParts, genai.Text(msg.Role+":"+msg.Content))
 	}
 	// Create tool definitions for the model
 	var toolDefs []*genai.Tool
