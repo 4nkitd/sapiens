@@ -253,7 +253,7 @@ func (a *Agent) executeWithTools(ctx context.Context, options map[string]interfa
 
 	// If all retries failed
 	if err != nil {
-		return Response{}, fmt.Errorf("executeWithTools failed after %d attempts: %w", err)
+		return Response{}, fmt.Errorf("executeWithTools failed after %d attempts: %w", attempts, err)
 	}
 
 	// Add the assistant response to the message history
@@ -291,7 +291,7 @@ func (a *Agent) executeWithStructure(ctx context.Context) (Response, error) {
 
 	// If all retries failed
 	if err != nil {
-		return Response{}, fmt.Errorf("executeWithStructure failed after %d attempts: %w", err)
+		return Response{}, fmt.Errorf("executeWithStructure failed after %d attempts: %w", attempts, err)
 	}
 
 	// Add the assistant response to the message history

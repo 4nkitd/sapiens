@@ -498,7 +498,7 @@ func (g *GoogleGenAI) StructuredOutput(ctx context.Context, messages []Message, 
 
 	// Instead of using ResponseSchema which causes MIME type errors,
 	// we'll add a direct instruction to return JSON
-	originalSystemPrompt := g.SystemPrompt.Content
+	// ConvertSchema, _ := (&schema).ConvertSchema(schema)
 
 	// Create instruction for structured output - make this more direct and forceful
 	schemaDescription := ""
@@ -512,6 +512,7 @@ func (g *GoogleGenAI) StructuredOutput(ctx context.Context, messages []Message, 
 		schemaDescription,
 	)
 
+	originalSystemPrompt := g.SystemPrompt.Content
 	// Set system prompt with JSON instruction
 	if originalSystemPrompt != "" {
 		g.SystemPrompt.Content = originalSystemPrompt + "\n\n" + jsonInstruction
