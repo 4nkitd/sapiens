@@ -25,120 +25,208 @@ import (
 	"os"
 
 	"github.com/4nkitd/sapiens"
+	"github.com/4nkitd/sapiens/gemini" // or "github.com/4nkitd/sapiens/openai"
 )
 
 func main() {
 	// Initialize the LLM client
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	llm := sapiens.NewGoogleGenAI(apiKey, "gemini-2.0-flash")
+	apiKey := os.Getenv("GEMINI_API_KEY") // or "OPENAI_API_KEY"
+	llm := gemini.NewGoogleGenAI(apiKey, "gemini-2.0-flash") // or openai.NewOpenAI(apiKey, "gpt-4o")
 	if err := llm.Initialize(); err != nil {
 		log.Fatalf("Failed to initialize LLM: %v", err)
 	}
-	
+
 	// Create an agent
-	agent := sapiens.NewAgent("MyAssistant", llm, apiKey, "gemini-2.0-flash", "google")
+	agent := sapiens.NewAgent("MyAssistant", llm, apiKey, "gemini-2.0-flash", "google") // or "openai" for provider
 	agent.AddSystemPrompt("You are a helpful assistant specialized in Go programming.", "1.0")
-	
+
 	// Run the agent
 	ctx := context.Background()
 	response, err := agent.Run(ctx, "How do I create a simple HTTP server in Go?")
 	if err != nil {
 		log.Fatalf("Error: %v", err)
 	}
-	
+
 	fmt.Println(response.Content)
 }
 ```
 
 ### Adding Tools
 
-Tools allow your agent to perform specific functions:
+Tools allow your agent to perform specific functions. See the [Tool documentation](tool.md) for more details.
 
 ```go
-// Define a weather tool
-weatherTool := sapiens.Tool{
-	Name:        "get_weather",
-	Description: "Get the current weather for a location",
-	InputSchema: &sapiens.Schema{
-		Type: "object",
-		Properties: map[string]sapiens.Schema{
-			"location": {
-				Type:        "string",
-				Description: "The city and state/country",
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+
+	"github.com/4nkitd/sapiens"
+	"github.com/4nkitd/sapiens/gemini" // or "github.com/4nkitd/sapiens/openai"
+)
+
+func main() {
+	// Initialize the LLM client
+	apiKey := os.Getenv("GEMINI_API_KEY") // or "OPENAI_API_KEY"
+	llm := gemini.NewGoogleGenAI(apiKey, "gemini-2.0-flash") // or openai.NewOpenAI(apiKey, "gpt-4o")
+	if err := llm.Initialize(); err != nil {
+		log.Fatalf("Failed to initialize LLM: %v", err)
+	}
+
+	// Create an agent
+	agent := sapiens.NewAgent("MyAssistant", llm, apiKey, "gemini-2.0-flash", "google") // or "openai" for provider
+	agent.AddSystemPrompt("You are a helpful assistant specialized in Go programming.", "1.0")
+
+	// Define a weather tool
+	weatherTool := sapiens.Tool{
+		Name:        "get_weather",
+		Description: "Get the current weather for a location",
+		InputSchema: &sapiens.Schema{
+			Type: "object",
+			Properties: map[string]sapiens.Schema{
+				"location": {
+					Type:        "string",
+					Description: "The city and state/country",
+				},
 			},
+			Required: []string{"location"},
 		},
-		Required: []string{"location"},
-	},
+	}
+
+	// Add the tool to the agent
+	agent.AddTools(weatherTool)
+
+	// Register tool implementation
+	agent.RegisterToolImplementation("get_weather", func(params map[string]interface{}) (string, error) {
+		location, _ := params["location"].(string)
+
+		// This would typically call a real weather API
+		return fmt.Sprintf("The weather in %s is sunny and 72 degrees.", location), nil
+	})
+
+	// Run the agent
+	ctx := context.Background()
+	response, err := agent.Run(ctx, "What's the weather like in San Francisco?")
+	if err != nil {
+		log.Fatalf("Error: %v", err)
+	}
+
+	fmt.Println(response.Content)
 }
-
-// Add the tool to the agent
-agent.AddTools(weatherTool)
-
-// Register tool implementation
-agent.RegisterToolImplementation("get_weather", func(params map[string]interface{}) (interface{}, error) {
-	location, _ := params["location"].(string)
-	
-	// This would typically call a real weather API
-	return map[string]interface{}{
-		"temperature": 72,
-		"condition": "Sunny",
-		"location": location,
-	}, nil
-})
 ```
 
 ### Using Structured Output
 
-Request structured responses from your agent:
+Request structured responses from your agent. See the [LLM Integration documentation](llm.md) for more details.
 
 ```go
-// Define a response schema
-schema := sapiens.Schema{
-	Type: "object",
-	Properties: map[string]sapiens.Schema{
-		"answer": {
-			Type:        "string",
-			Description: "The answer to the user's question",
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+
+	"github.com/4nkitd/sapiens"
+	"github.com/4nkitd/sapiens/gemini" // or "github.com/4nkitd/sapiens/openai"
+)
+
+func main() {
+	// Initialize the LLM client
+	apiKey := os.Getenv("GEMINI_API_KEY") // or "OPENAI_API_KEY"
+	llm := gemini.NewGoogleGenAI(apiKey, "gemini-2.0-flash") // or openai.NewOpenAI(apiKey, "gpt-4o")
+	if err := llm.Initialize(); err != nil {
+		log.Fatalf("Failed to initialize LLM: %v", err)
+	}
+
+	// Create an agent
+	agent := sapiens.NewAgent("MyAssistant", llm, apiKey, "gemini-2.0-flash", "google") // or "openai" for provider
+	agent.AddSystemPrompt("You are a helpful assistant specialized in Go programming.", "1.0")
+
+	// Define a response schema
+	schema := sapiens.Schema{
+		Type: "object",
+		Properties: map[string]sapiens.Schema{
+			"answer": {
+				Type:        "string",
+				Description: "The answer to the user's question",
+			},
+			"confidence": {
+				Type:        "number",
+				Description: "Confidence score from 0 to 1",
+			},
 		},
-		"confidence": {
-			Type:        "number",
-			Description: "Confidence score from 0 to 1",
-		},
-	},
-	Required: []string{"answer", "confidence"},
+		Required: []string{"answer", "confidence"},
+	}
+
+	// Set the schema on your agent
+	agent.SetStructuredResponseSchema(schema)
+
+	// Run the agent
+	ctx := context.Background()
+	response, err := agent.Run(ctx, "What is the population of London?")
+	if err != nil {
+		log.Fatalf("Error: %v", err)
+	}
+
+	// Access the structured data
+	structuredData := response.Structured
+	fmt.Printf("Answer: %s (Confidence: %.2f)\n",
+		structuredData.(map[string]interface{})["answer"],
+		structuredData.(map[string]interface{})["confidence"])
 }
-
-// Set the schema on your agent
-agent.SetStructuredResponseSchema(schema)
-
-// Get structured responses
-response, err := agent.Run(ctx, "What is the population of London?")
-if err != nil {
-	log.Fatalf("Error: %v", err)
-}
-
-// Access the structured data
-structuredData := response.Structured
-fmt.Printf("Answer: %s (Confidence: %.2f)\n", 
-	structuredData.(map[string]interface{})["answer"],
-	structuredData.(map[string]interface{})["confidence"])
 ```
 
 ### Adding Context
 
-Provide your agent with additional context:
+Provide your agent with additional context. See the [Agent documentation](agent.md) for more details.
 
 ```go
-// Add context information
-agent.SetStringContext(`
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+
+	"github.com/4nkitd/sapiens"
+	"github.com/4nkitd/sapiens/gemini" // or "github.com/4nkitd/sapiens/openai"
+)
+
+func main() {
+	// Initialize the LLM client
+	apiKey := os.Getenv("GEMINI_API_KEY") // or "OPENAI_API_KEY"
+	llm := gemini.NewGoogleGenAI(apiKey, "gemini-2.0-flash") // or openai.NewOpenAI(apiKey, "gpt-4o")
+	if err := llm.Initialize(); err != nil {
+		log.Fatalf("Failed to initialize LLM: %v", err)
+	}
+
+	// Create an agent
+	agent := sapiens.NewAgent("MyAssistant", llm, apiKey, "gemini-2.0-flash", "google") // or "openai" for provider
+	agent.AddSystemPrompt("You are a helpful assistant specialized in Go programming.", "1.0")
+
+	// Add context information
+	agent.SetStringContext(`
 Company: TechCorp
 Founded: 2010
 Products: Cloud services, AI solutions, Data analytics
 Headquarters: San Francisco
 `)
 
-// The agent will use this context when answering questions
-response, err := agent.Run(ctx, "When was our company founded?")
+	// Run the agent
+	ctx := context.Background()
+	response, err := agent.Run(ctx, "When was our company founded?")
+	if err != nil {
+		log.Fatalf("Error: %v", err)
+	}
+
+	fmt.Println(response.Content)
+}
 ```
 
 For more detailed information, see the documentation for each specific component.

@@ -5,7 +5,7 @@ Sapiens is a lightweight, flexible framework for building AI agents in Go. It pr
 ## Features
 
 - **Multiple LLM Support**: Built-in support for Google Gemini and OpenAI (easily extensible to other providers)
-- **Tool Calling**: Define and use tools with input/output schemas for function calling 
+- **Tool Calling**: Define and use tools with input/output schemas for function calling
 - **Structured Output**: Generate structured responses based on defined schemas
 - **Conversation Memory**: Built-in conversation history management
 - **Dynamic Prompting**: Template-based prompt generation with versioning
@@ -30,122 +30,32 @@ import (
 	"fmt"
 	"log"
 	"os"
-	
+
 	"github.com/4nkitd/sapiens"
+	"github.com/4nkitd/sapiens/gemini" // or "github.com/4nkitd/sapiens/openai"
 )
 
 func main() {
-	// Initialize with Google Gemini (or use other providers)
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	llm := sapiens.NewGoogleGenAI(apiKey, "gemini-2.0-flash")
+	// Initialize the LLM client
+	apiKey := os.Getenv("GEMINI_API_KEY") // or "OPENAI_API_KEY"
+	llm := gemini.NewGoogleGenAI(apiKey, "gemini-2.0-flash") // or openai.NewOpenAI(apiKey, "gpt-4o")
 	if err := llm.Initialize(); err != nil {
 		log.Fatalf("Failed to initialize LLM: %v", err)
 	}
-	
-	// Create a new agent
-	agent := sapiens.NewAgent("Assistant", llm, apiKey, "gemini-2.0-flash", "google")
-	agent.AddSystemPrompt("You are a helpful assistant that provides concise answers.", "1.0")
-	
-	// Run the agent
-	ctx := context.Background()
-	response, err := agent.Run(ctx, "What is the capital of France?")
-	if err != nil {
-		log.Fatalf("Error: %v", err)
-	}
-	
-	fmt.Println(response.Content)
-}
-```
 
-### Agent with Tools
-
-```go
-package main
-
-import (
-	"context"
-	"fmt"
-	"log"
-	"os"
-	
-	"github.com/4nkitd/sapiens"
-)
-
-func main() {
-	apiKey := os.Getenv("GEMINI_API_KEY")
-	llm := sapiens.NewGoogleGenAI(apiKey, "gemini-2.0-flash")
-	if err := llm.Initialize(); err != nil {
-		log.Fatalf("Failed to initialize LLM: %v", err)
-	}
-	
 	// Create an agent
-	agent := sapiens.NewAgent("WeatherAssistant", llm, apiKey, "gemini-2.0-flash", "google")
-	agent.AddSystemPrompt("You are a helpful weather assistant.", "1.0")
-	
-	// Define a weather tool
-	weatherTool := sapiens.Tool{
-		Name:        "get_weather",
-		Description: "Get the current weather for a location",
-		InputSchema: &sapiens.Schema{
-			Type: "object",
-			Properties: map[string]sapiens.Schema{
-				"location": {
-					Type:        "string",
-					Description: "The city and state/country",
-				},
-			},
-			Required: []string{"location"},
-		},
-	}
-	
-	// Add the tool to the agent
-	agent.AddTools(weatherTool)
-	
-	// Register tool implementation
-	agent.RegisterToolImplementation("get_weather", func(params map[string]interface{}) (interface{}, error) {
-		location, _ := params["location"].(string)
-		return map[string]interface{}{
-			"temperature": 72,
-			"condition": "Sunny",
-			"location": location,
-		}, nil
-	})
-	
+	agent := sapiens.NewAgent("MyAssistant", llm, apiKey, "gemini-2.0-flash", "google") // or "openai" for provider
+	agent.AddSystemPrompt("You are a helpful assistant specialized in Go programming.", "1.0")
+
 	// Run the agent
 	ctx := context.Background()
-	response, err := agent.Run(ctx, "What's the weather like in Paris?")
+	response, err := agent.Run(ctx, "How do I create a simple HTTP server in Go?")
 	if err != nil {
 		log.Fatalf("Error: %v", err)
 	}
-	
+
 	fmt.Println(response.Content)
 }
-```
-
-### Dynamic Prompting
-
-```go
-promptTemplate := `
-You are a {{tone}} assistant specialized in {{field}}.
-When discussing {{topic}}, keep these points in mind:
-{{#points}}
-- {{.}}
-{{/points}}
-`
-
-cardData := map[string]interface{}{
-	"tone": "friendly",
-	"field": "programming",
-	"topic": "Go development",
-	"points": []string{
-		"Explain concepts clearly",
-		"Provide working code examples",
-		"Follow Go best practices",
-	},
-}
-
-dynamicPrompt, err := sapiens.ApplyTemplate(promptTemplate, cardData)
-agent.AddSystemPrompt(dynamicPrompt, "1.0")
 ```
 
 ## Documentation
