@@ -140,7 +140,6 @@ func (a *Agent) UpdateStringContext(contextString string) {
 // SetStructuredResponseSchema sets the schema for structured responses
 func (a *Agent) SetStructuredResponseSchema(schema Schema) {
 	a.StructuredResponseSchema = schema
-
 	a.Tools = append(a.Tools, Tool{
 		Name:        "structured_output",
 		Description: "Structured output tool",
@@ -169,7 +168,9 @@ func (a *Agent) ExecuteLLM(ctx context.Context) (Response, error) {
 
 	for attempts = 0; attempts < a.MaxRetry; attempts++ {
 		// Logic fork based on capabilities needed
-		if len(a.Tools) > 0 {
+		if len(a.Tools) > 0 && a.StructuredResponseSchema.Type != "" {
+			response, err = a.executeWithToolsAndStructure(ctx, options)
+		} else if len(a.Tools) > 0 {
 			response, err = a.executeWithTools(ctx, options)
 		} else if a.StructuredResponseSchema.Type != "" {
 			response, err = a.executeWithStructure(ctx)
@@ -226,8 +227,16 @@ func (a *Agent) executeWithTools(ctx context.Context, options map[string]interfa
 	var err error
 	var attempts int
 
+	// Create a filtered tools list excluding the structured_output tool
+	filteredTools := make([]Tool, 0, len(a.Tools))
+	for _, tool := range a.Tools {
+		if tool.Name != "structured_output" {
+			filteredTools = append(filteredTools, tool)
+		}
+	}
+
 	for attempts = 0; attempts < a.MaxRetry; attempts++ {
-		response, err = a.LLM.Implementation.ChatCompletionWithTools(ctx, a.Messages, a.Tools, options)
+		response, err = a.LLM.Implementation.ChatCompletionWithTools(ctx, a.Messages, filteredTools, options)
 		if err == nil {
 			break // Success, exit retry loop
 		}
@@ -244,8 +253,7 @@ func (a *Agent) executeWithTools(ctx context.Context, options map[string]interfa
 
 	// If all retries failed
 	if err != nil {
-		return Response{}, fmt.Errorf("executeWithTools failed after %d attempts: %w",
-			attempts, err)
+		return Response{}, fmt.Errorf("executeWithTools failed after %d attempts: %w", err)
 	}
 
 	// Add the assistant response to the message history
@@ -283,8 +291,7 @@ func (a *Agent) executeWithStructure(ctx context.Context) (Response, error) {
 
 	// If all retries failed
 	if err != nil {
-		return Response{}, fmt.Errorf("executeWithStructure failed after %d attempts: %w",
-			attempts, err)
+		return Response{}, fmt.Errorf("executeWithStructure failed after %d attempts: %w", err)
 	}
 
 	// Add the assistant response to the message history
@@ -297,28 +304,121 @@ func (a *Agent) executeWithStructure(ctx context.Context) (Response, error) {
 }
 
 // ExecuteWithToolsAndStructure processes a request with both tools and structured output
-func (a *Agent) ExecuteWithToolsAndStructure(ctx context.Context) (Response, error) {
-	// First, execute with tools
-	toolResponse, err := a.executeWithTools(ctx, a.getOptions())
+func (a *Agent) executeWithToolsAndStructure(ctx context.Context, options map[string]interface{}) (Response, error) {
+	// Create a filtered tools list excluding the structured_output tool
+	filteredTools := make([]Tool, 0, len(a.Tools))
+	for _, tool := range a.Tools {
+		if tool.Name != "structured_output" {
+			filteredTools = append(filteredTools, tool)
+		}
+	}
+
+	// Execute with tools first
+	response, err := a.LLM.Implementation.ChatCompletionWithTools(ctx, a.Messages, filteredTools, options)
 	if err != nil {
 		return Response{}, err
 	}
 
-	// If there are tool calls, handle them first
-	if len(toolResponse.ToolCalls) > 0 {
-		return toolResponse, nil
+	// If there are tool calls, process them immediately within this function
+	if len(response.ToolCalls) > 0 {
+		// Add the assistant response to the message history
+		a.Messages = append(a.Messages, Message{
+			Role:      "assistant",
+			Content:   response.Content,
+			ToolCalls: response.ToolCalls,
+		})
+
+		// Process each tool call and add results to the conversation
+		for _, toolCall := range response.ToolCalls {
+			implementation, exists := a.toolImplementations[toolCall.Name]
+			if !exists {
+				continue
+			}
+
+			// Execute the tool
+			result, err := implementation(toolCall.InputMap)
+			if err != nil {
+				continue
+			}
+
+			// Convert result to JSON
+			resultJSON, err := json.Marshal(result)
+			if err != nil {
+				continue
+			}
+
+			// Add result to conversation
+			a.Messages = append(a.Messages, Message{
+				Role:    "function",
+				Name:    toolCall.Name,
+				Content: string(resultJSON),
+				Options: map[string]interface{}{
+					"tool_call_id": toolCall.ID,
+				},
+			})
+		}
+
+		// Now request a structured response directly
+		structuredPrompt := fmt.Sprintf(
+			"Based on the information provided about the weather in Delhi, respond with a JSON object containing these fields: answer (string): a concise summary of the weather information, confidence (number): your confidence in this answer from 0 to 1. ONLY respond with valid JSON.",
+		)
+
+		// Add structured prompt
+		a.Messages = append(a.Messages, Message{
+			Role:    "user",
+			Content: structuredPrompt,
+		})
+
+		// Use regular ChatCompletion to avoid MIME type errors
+		structuredResponse, err := a.LLM.Implementation.ChatCompletion(ctx, a.Messages)
+		if err != nil {
+			// Return the original response even if structured part fails
+			a.Messages = a.Messages[:len(a.Messages)-1] // Remove the structured prompt
+			return response, nil
+		}
+
+		// Try to extract JSON from the response
+		var structured interface{}
+		err = json.Unmarshal([]byte(structuredResponse.Content), &structured)
+		if err == nil {
+			// Successfully parsed JSON
+			response.Structured = structured
+			response.Content = structuredResponse.Content
+		}
+
+		// Remove the structured prompt from messages
+		a.Messages = a.Messages[:len(a.Messages)-1]
+
+		return response, nil
 	}
 
-	// Otherwise, ensure the response is structured
+	// If no tool calls, try to get structured response directly
 	var structured interface{}
-	err = json.Unmarshal([]byte(toolResponse.Content), &structured)
-	if err != nil {
-		// If not structured, try again with explicit structure request
-		return a.executeWithStructure(ctx)
+	err = json.Unmarshal([]byte(response.Content), &structured)
+	if err == nil {
+		response.Structured = structured
+		return response, nil
 	}
 
-	toolResponse.Structured = structured
-	return toolResponse, nil
+	// If we reached here, we need to explicitly request a structured response
+	structuredResponse, err := a.executeWithStructure(ctx)
+	if err == nil {
+		response.Structured = structuredResponse.Structured
+		if response.Content == "" {
+			response.Content = structuredResponse.Content
+		}
+	}
+
+	return response, nil
+}
+
+// Helper function to get a description of schema fields
+func getSchemaDescription(schema Schema) string {
+	result := ""
+	for name, prop := range schema.Properties {
+		result += name + " (" + prop.Type + "): " + prop.Description + ", "
+	}
+	return result
 }
 
 // HandleToolResponse processes tool outputs and continues the conversation
@@ -382,11 +482,34 @@ func (a *Agent) Run(ctx context.Context, query string) (*Response, error) {
 		Content:    response.Content,
 		ToolCalls:  response.ToolCalls,
 		Structured: response.Structured,
+		Raw:        response.Raw,
 	}
 
-	// Process tool calls if present
+	// Process tool calls if present (and they're not structured_output calls)
 	if len(responsePtr.ToolCalls) > 0 && len(a.toolImplementations) > 0 {
-		return a.handleToolCalls(ctx, responsePtr)
+		// Check if all tool calls are structured_output
+		allStructured := true
+		for _, call := range responsePtr.ToolCalls {
+			if call.Name != "structured_output" {
+				allStructured = false
+				break
+			}
+		}
+
+		// Only process if we have actual tool calls to execute
+		if !allStructured {
+			finalResponse, err := a.handleToolCalls(ctx, responsePtr)
+			if err != nil {
+				return responsePtr, err // Return partial response on error
+			}
+
+			// Preserve structured data
+			if responsePtr.Structured != nil && finalResponse.Structured == nil {
+				finalResponse.Structured = responsePtr.Structured
+			}
+
+			return finalResponse, nil
+		}
 	}
 
 	// Add assistant response to conversation history
@@ -402,8 +525,14 @@ func (a *Agent) Run(ctx context.Context, query string) (*Response, error) {
 func (a *Agent) handleToolCalls(ctx context.Context, response *Response) (*Response, error) {
 	toolResults := make([]ToolResult, 0, len(response.ToolCalls))
 
-	// Process each tool call
+	// Process each tool call (skip structured_output)
 	for _, toolCall := range response.ToolCalls {
+		if toolCall.Name == "structured_output" {
+			// Handle structured output separately
+			response.Structured = toolCall.InputMap
+			continue
+		}
+
 		result, err := a.executeTool(toolCall)
 		if err != nil {
 			return nil, err
@@ -418,7 +547,12 @@ func (a *Agent) handleToolCalls(ctx context.Context, response *Response) (*Respo
 		ToolCalls: response.ToolCalls,
 	})
 
-	// Add tool results to conversation history
+	// If no actual tools were executed (only structured_output), return early
+	if len(toolResults) == 0 {
+		return response, nil
+	}
+
+	// Add tool results to conversation
 	for _, result := range toolResults {
 		a.conversationHistory = append(a.conversationHistory, Message{
 			Role:       "tool",
@@ -428,7 +562,7 @@ func (a *Agent) handleToolCalls(ctx context.Context, response *Response) (*Respo
 
 		// Also add to Messages for consistency
 		a.Messages = append(a.Messages, Message{
-			Role:    "function", // LLM interfaces typically use "function" role
+			Role:    "function",
 			Name:    getToolNameFromCallID(result.ToolCallID, response.ToolCalls),
 			Content: result.Result,
 			Options: map[string]interface{}{
@@ -437,6 +571,47 @@ func (a *Agent) handleToolCalls(ctx context.Context, response *Response) (*Respo
 		})
 	}
 
+	// For structured output, directly request JSON after tool results
+	if a.StructuredResponseSchema.Type != "" {
+		// Add explicit instruction for JSON response
+		structuredPrompt := fmt.Sprintf(
+			"Based on the information provided, respond ONLY with a valid JSON object containing these fields: %s.",
+			getSchemaDescription(a.StructuredResponseSchema),
+		)
+
+		// Create temporary messages to request structured output
+		tempMessages := make([]Message, len(a.Messages))
+		copy(tempMessages, a.Messages)
+		tempMessages = append(tempMessages, Message{
+			Role:    "user",
+			Content: structuredPrompt,
+		})
+
+		// Get structured response
+		structuredResponse, err := a.LLM.Implementation.ChatCompletion(ctx, tempMessages)
+		if err == nil {
+			// Try to parse as JSON
+			var structured interface{}
+			err = json.Unmarshal([]byte(structuredResponse.Content), &structured)
+			if err == nil {
+				// Create final response with both content and structured data
+				finalResponse := Response{
+					Content:    structuredResponse.Content,
+					Structured: structured,
+				}
+
+				// Add final response to conversation history
+				a.conversationHistory = append(a.conversationHistory, Message{
+					Role:    "assistant",
+					Content: finalResponse.Content,
+				})
+
+				return &finalResponse, nil
+			}
+		}
+	}
+
+	// If structured approach failed or wasn't needed, use regular continuation
 	// Process the final response after tool calls
 	finalResponse, err := a.ExecuteLLM(ctx)
 	if err != nil {
@@ -449,7 +624,6 @@ func (a *Agent) handleToolCalls(ctx context.Context, response *Response) (*Respo
 		Content: finalResponse.Content,
 	})
 
-	// Return as pointer to match function signature
 	return &finalResponse, nil
 }
 

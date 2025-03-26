@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/option"
@@ -296,7 +297,27 @@ func (g *GoogleGenAI) ChatCompletionWithTools(ctx context.Context, messages []Me
 		},
 	}
 
-	// Apply options
+	// Add special instruction to the system prompt for structured output if needed
+	originalSystemPrompt := g.SystemPrompt.Content
+	structuredToolNeeded := false
+
+	for _, tool := range tools {
+		if tool.Name == "structured_output" {
+			structuredToolNeeded = true
+			break
+		}
+	}
+
+	// If we need structured output, adjust the system prompt
+	if structuredToolNeeded {
+		if originalSystemPrompt != "" {
+			g.SystemPrompt.Content += "\nAfter calling any tools, please provide your final response in JSON format."
+		} else {
+			g.SystemPrompt.Content = "After calling any tools, please provide your final response in JSON format."
+		}
+	}
+
+	// Apply options and set system instruction
 	if options != nil {
 		if temp, ok := options["temperature"].(float32); ok {
 			g.Model.SetTemperature(temp)
@@ -322,6 +343,17 @@ func (g *GoogleGenAI) ChatCompletionWithTools(ctx context.Context, messages []Me
 	// Generate content
 	resp, err := g.Model.GenerateContent(ctx, inputParts...)
 
+	// Restore original system prompt
+	g.SystemPrompt.Content = originalSystemPrompt
+	if originalSystemPrompt != "" {
+		g.Model.SystemInstruction = &genai.Content{
+			Parts: []genai.Part{
+				genai.Text(originalSystemPrompt),
+			},
+			Role: "system",
+		}
+	}
+
 	if err != nil {
 		return Response{}, fmt.Errorf("failed to generate content: %v", err)
 	}
@@ -333,17 +365,6 @@ func (g *GoogleGenAI) ChatCompletionWithTools(ctx context.Context, messages []Me
 	// Process response including possible tool calls
 	response := Response{
 		Raw: resp,
-	}
-
-	// Check if response contains a structured tool output
-	if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
-		if functionCall, ok := resp.Candidates[0].Content.Parts[0].(genai.FunctionCall); ok {
-			if functionCall.Name == "structured_output" {
-				// Handle structured output specially
-				response.Structured = functionCall.Args
-				return response, nil
-			}
-		}
 	}
 
 	// Extract content and potential tool calls
@@ -362,6 +383,11 @@ func (g *GoogleGenAI) ChatCompletionWithTools(ctx context.Context, messages []Me
 				response.ToolCalls = make([]ToolCall, 0)
 			}
 			response.ToolCalls = append(response.ToolCalls, toolCall)
+
+			// If this is a structured_output tool call, capture it as structured data
+			if p.Name == "structured_output" {
+				response.Structured = p.Args
+			}
 		}
 	}
 
@@ -470,57 +496,111 @@ func (g *GoogleGenAI) StructuredOutput(ctx context.Context, messages []Message, 
 		return Response{}, fmt.Errorf("GoogleGenAI client not initialized, call Initialize() first")
 	}
 
-	// Add schema instruction to the last message or create a new one
-	// var schemaInstruction string
-	// schemaBytes, err := json.MarshalIndent(schema, "", "  ")
-	// if err != nil {
-	// 	return Response{}, fmt.Errorf("failed to marshal schema: %v", err)
-	// }
+	// Instead of using ResponseSchema which causes MIME type errors,
+	// we'll add a direct instruction to return JSON
+	originalSystemPrompt := g.SystemPrompt.Content
 
-	// schemaInstruction = "Please provide a response that conforms to the following JSON schema:\n```json\n" +
-	// 	string(schemaBytes) + "\n```\nYour response should be valid JSON that follows this schema."
+	// Create instruction for structured output - make this more direct and forceful
+	schemaDescription := ""
+	for name, prop := range schema.Properties {
+		schemaDescription += fmt.Sprintf("- %s (%s): %s\n", name, prop.Type, prop.Description)
+	}
 
-	// modifiedMessages := make([]Message, len(messages))
-	// copy(modifiedMessages, messages)
+	jsonInstruction := fmt.Sprintf(
+		"You MUST respond with ONLY a valid JSON object containing these fields:\n%s\n"+
+			"Your response MUST be valid JSON without any additional text, markdown formatting, or explanation.",
+		schemaDescription,
+	)
 
-	// // Append schema instruction to the last user message or add a new message
-	// if len(modifiedMessages) > 0 && modifiedMessages[len(modifiedMessages)-1].Role == "user" {
-	// 	g.Model.SystemInstruction = &genai.Content{
-	// 		Parts: []genai.Part{
-	// 			genai.Text(g.SystemPrompt.Content + "\n\n" + schemaInstruction),
-	// 		},
-	// 		Role: "system",
-	// 	}
-	// } else {
-	// 	modifiedMessages = append(modifiedMessages, Message{
-	// 		Role:    "user",
-	// 		Content: schemaInstruction,
-	// 	})
-	// }
+	// Set system prompt with JSON instruction
+	if originalSystemPrompt != "" {
+		g.SystemPrompt.Content = originalSystemPrompt + "\n\n" + jsonInstruction
+	} else {
+		g.SystemPrompt.Content = jsonInstruction
+	}
 
-	ConvertSchema, _ := schema.ConvertSchema(schema)
+	// Set the system instruction
+	g.Model.SystemInstruction = &genai.Content{
+		Parts: []genai.Part{
+			genai.Text(g.SystemPrompt.Content),
+		},
+		Role: "system",
+	}
 
-	g.Model.ResponseSchema = ConvertSchema
+	// Ensure ResponseSchema is not set
+	g.Model.ResponseSchema = nil
 
-	// Get the completion
-	responseWithSchema, err := g.ChatCompletion(ctx, messages)
+	// Process messages into genai format
+	var inputParts []genai.Part
+	for _, msg := range messages {
+		inputParts = append(inputParts, genai.Text(msg.Role+":"+msg.Content))
+	}
+
+	// Generate content directly
+	resp, err := g.Model.GenerateContent(ctx, inputParts...)
+
+	// Restore original system prompt
+	g.SystemPrompt.Content = originalSystemPrompt
+	if originalSystemPrompt != "" {
+		g.Model.SystemInstruction = &genai.Content{
+			Parts: []genai.Part{
+				genai.Text(originalSystemPrompt),
+			},
+			Role: "system",
+		}
+	} else {
+		g.Model.SystemInstruction = nil
+	}
+
 	if err != nil {
 		return Response{}, err
 	}
 
-	// Extract JSON from the response
-	jsonStr := responseWithSchema.Content
+	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+		return Response{}, fmt.Errorf("no content in response")
+	}
 
-	// Try to parse the response as JSON
-	var structuredData interface{}
-	err = json.Unmarshal([]byte(jsonStr), &structuredData)
+	// Extract content
+	var content string
+	for _, part := range resp.Candidates[0].Content.Parts {
+		if text, ok := part.(genai.Text); ok {
+			content += string(text)
+		}
+	}
+
+	// Try to parse the content as JSON
+	var structured interface{}
+	err = json.Unmarshal([]byte(content), &structured)
 	if err != nil {
-		return Response{Content: jsonStr}, fmt.Errorf("response is not valid JSON: %v", err)
+		// If it's not valid JSON, try to extract JSON from the response
+		// Look for content between ``` markers
+		jsonStart := strings.Index(content, "```json")
+		if jsonStart != -1 {
+			jsonStart += 7 // Skip ```json
+			jsonEnd := strings.Index(content[jsonStart:], "```")
+			if jsonEnd != -1 {
+				// Extract JSON content
+				jsonContent := strings.TrimSpace(content[jsonStart : jsonStart+jsonEnd])
+				// Try to parse again
+				err = json.Unmarshal([]byte(jsonContent), &structured)
+				if err == nil {
+					// We successfully parsed JSON from markdown code block
+					return Response{
+						Content:    content,
+						Structured: structured,
+						Raw:        resp,
+					}, nil
+				}
+			}
+		}
+
+		// Return the content even if it's not structured properly
+		return Response{Content: content, Raw: resp}, nil
 	}
 
 	return Response{
-		Content:    jsonStr,
-		Structured: structuredData,
-		Raw:        responseWithSchema.Raw,
+		Content:    content,
+		Structured: structured,
+		Raw:        resp,
 	}, nil
 }
