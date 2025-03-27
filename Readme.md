@@ -32,13 +32,12 @@ import (
 	"os"
 
 	"github.com/4nkitd/sapiens"
-	"github.com/4nkitd/sapiens/gemini" // or "github.com/4nkitd/sapiens/openai"
 )
 
 func main() {
 	// Initialize the LLM client
 	apiKey := os.Getenv("GEMINI_API_KEY") // or "OPENAI_API_KEY"
-	llm := gemini.NewGoogleGenAI(apiKey, "gemini-2.0-flash") // or openai.NewOpenAI(apiKey, "gpt-4o")
+	llm := sapiens.NewGoogleGenAI(apiKey, "gemini-2.0-flash") // or sapiens.NewOpenAI(apiKey, "gpt-4o")
 	if err := llm.Initialize(); err != nil {
 		log.Fatalf("Failed to initialize LLM: %v", err)
 	}
