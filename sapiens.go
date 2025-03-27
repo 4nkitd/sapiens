@@ -13,6 +13,10 @@ type LLMInterface interface {
 	// Initialize sets up the language model with provided options
 	Initialize() error
 
+	GetModelName() string
+
+	GenerateEmbedding(ctx context.Context, model string, text string, embeddingType EmbeddingType) (Embedding, error)
+
 	SetSystemPrompt(prompt SystemPrompt)
 
 	Generate(ctx context.Context, request *Request) (*Response, error)

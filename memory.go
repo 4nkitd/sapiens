@@ -44,10 +44,10 @@ func (m *Memory) Reset() {
 }
 
 // cosineSimilarity calculates similarity between two vectors
-func (m *Memory) cosineSimilarity(vec1, vec2 Vector) float32 {
-	sum := float32(0.0)
+func (m *Memory) cosineSimilarity(vec1, vec2 Vector) float64 {
+	sum := float64(0.0)
 	for i := 0; i < len(vec1); i++ {
-		sum += vec1[i] * vec2[i]
+		sum += float64(vec1[i] * vec2[i])
 	}
 	return sum
 }
@@ -65,7 +65,7 @@ func (m *Memory) Search(queryEmbedding Vector) []SimilarityResult {
 		// Add to results
 		results = append(results, SimilarityResult{
 			Text:      storedEmbedding.Text,
-			Score:     similarity,
+			Score:     float64(similarity),
 			Embedding: storedEmbedding,
 		})
 	}

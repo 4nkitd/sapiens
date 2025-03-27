@@ -1,10 +1,12 @@
 package sapiens
 
 import (
+	"context"
+
 	"github.com/patrickmn/go-cache"
 )
 
-type Vector []float32
+type Vector []float64
 
 // Prompt defines the system prompt and its version.
 type Prompt struct {
@@ -41,14 +43,20 @@ type Memory struct {
 	Store  *cache.Cache           `json:"store"`
 }
 
+type EmbeddingType string
+
 type Embedding struct {
-	Vector Vector `json:"vector"`
-	Text   string `json:"text"`
+	LLM     LLMInterface    // LLM used for the embedding
+	Context context.Context // Context of the embedding
+	Model   string          // Model used for the embedding
+	Vector  []float64       // Embedding vector
+	Text    string          // Original text
+	Type    EmbeddingType   // Type of embedding
 }
 
 type SimilarityResult struct {
 	Text      string
-	Score     float32
+	Score     float64
 	Embedding Embedding
 }
 
@@ -87,9 +95,12 @@ type Response struct {
 	Raw         interface{} `json:"raw,omitempty"`          // Raw response from the LLM
 }
 
+type AgentType string
+
 // Agent represents an AI agent that can process queries and use tools
 type Agent struct {
 	Name                     string
+	Type                     AgentType // Type of agent
 	LLM                      *LLM
 	SystemPrompts            []SystemPrompt
 	StructuredResponseSchema Schema

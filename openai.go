@@ -38,6 +38,37 @@ func (o *OpenAI) Initialize() error {
 	return nil
 }
 
+func (o *OpenAI) GetModelName() string {
+	return o.ModelName
+}
+
+func (o *OpenAI) GenerateEmbedding(ctx context.Context, model string, text string, embeddingType EmbeddingType) (Embedding, error) {
+
+	responseOfAi, errEmbedding := o.Client.Embeddings.New(ctx, openai.EmbeddingNewParams{
+		Model: model,
+		Input: openai.EmbeddingNewParamsInputUnion{
+			OfString: openai.String(text),
+		},
+	},
+	)
+	if errEmbedding != nil {
+		return Embedding{}, errEmbedding
+	}
+
+	// Convert the response to Embedding
+	if len(responseOfAi.Data) == 0 {
+		return Embedding{}, fmt.Errorf("no embeddings returned from the API")
+	}
+
+	embedding := Embedding{
+		Vector: responseOfAi.Data[0].Embedding,
+		Text:   text,
+		Type:   embeddingType,
+	}
+
+	return embedding, nil
+}
+
 // Complete generates a completion for the given prompt using default settings
 func (o *OpenAI) Complete(ctx context.Context, prompt string) (string, error) {
 	return o.CompleteWithOptions(ctx, prompt, nil)

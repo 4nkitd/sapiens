@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/google/generative-ai-go/genai" // Import OpenAI
@@ -12,13 +13,65 @@ import (
 
 // GoogleGenAI implements the LLMInterface for Google's Generative AI
 type GoogleGenAI struct {
-	Client       *genai.Client
-	SystemPrompt SystemPrompt
-	Model        *genai.GenerativeModel
-	APIKey       string
-	ModelName    string
-	MaxTokens    int32
-	Temperature  float32
+	Client         *genai.Client
+	SystemPrompt   SystemPrompt
+	Model          *genai.GenerativeModel
+	APIKey         string
+	ModelName      string
+	MaxTokens      int32
+	Temperature    float32
+	EmbeddingModel *genai.EmbeddingModel
+}
+
+func (g *GoogleGenAI) GenerateEmbedding(ctx context.Context, model string, text string, embeddingType EmbeddingType) (Embedding, error) {
+
+	em := g.EmbeddingModel
+
+	// Set the TaskType based on the embeddingType
+	switch embeddingType {
+	case "SEMANTIC_SIMILARITY":
+		em.TaskType = genai.TaskTypeSemanticSimilarity
+	case "CLASSIFICATION":
+		em.TaskType = genai.TaskTypeClassification
+	case "CLUSTERING":
+		em.TaskType = genai.TaskTypeClustering
+	case "RETRIEVAL_DOCUMENT":
+		em.TaskType = genai.TaskTypeRetrievalDocument
+	case "RETRIEVAL_QUERY":
+		em.TaskType = genai.TaskTypeRetrievalQuery
+	case "QUESTION_ANSWERING":
+		em.TaskType = genai.TaskTypeQuestionAnswering
+	case "FACT_VERIFICATION":
+		em.TaskType = genai.TaskTypeFactVerification
+	default:
+		return Embedding{}, fmt.Errorf("unsupported embedding type: %s", embeddingType)
+	}
+
+	res, err := em.EmbedContent(ctx, genai.Text(text))
+
+	if err != nil {
+		return Embedding{}, fmt.Errorf("failed to generate embedding: %w", err)
+	}
+
+	if res.Embedding == nil || len(res.Embedding.Values) == 0 {
+		return Embedding{}, fmt.Errorf("embedding generation returned an empty vector")
+	}
+
+	// Convert []float32 to []float64
+	float64Values := make([]float64, len(res.Embedding.Values))
+	for i, v := range res.Embedding.Values {
+		float64Values[i] = float64(v)
+	}
+
+	return Embedding{
+		Vector: float64Values,
+		Text:   text,
+		Type:   embeddingType,
+	}, nil
+}
+
+func (o *GoogleGenAI) GetModelName() string {
+	return o.ModelName
 }
 
 // Generate implements LLMInterface.
@@ -61,11 +114,22 @@ func (g *GoogleGenAI) Generate(ctx context.Context, request *Request) (*Response
 
 // NewGoogleGenAI creates a new instance of Google GenAI LLM
 func NewGoogleGenAI(apiKey string, modelName string) *GoogleGenAI {
+	ctx := context.Background()
+	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
+	if err != nil {
+		log.Fatalf("Failed to create Gemini client: %v", err)
+		return nil // or panic, depending on your error handling strategy
+	}
+
+	embeddingModel := client.EmbeddingModel("gemini-embedding-exp-03-07")
+
 	return &GoogleGenAI{
-		APIKey:      apiKey,
-		ModelName:   modelName,
-		MaxTokens:   1024, // Default max tokens
-		Temperature: 0.7,  // Default temperature
+		Client:         client,
+		APIKey:         apiKey,
+		ModelName:      modelName,
+		MaxTokens:      1024, // Default max tokens
+		Temperature:    0.7,  // Default temperature
+		EmbeddingModel: embeddingModel,
 	}
 }
 
