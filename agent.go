@@ -175,6 +175,20 @@ func (a *Agent) ExecuteLLM(ctx context.Context) (Response, error) {
 		} else if a.StructuredResponseSchema.Type != "" {
 			response, err = a.executeWithStructure(ctx)
 		} else {
+			// Query memory and add results to messages
+			if a.Memory != nil {
+				memoryResults := a.Memory.Search([]float64{}) // Replace with actual query vector if available
+				if len(memoryResults) > 0 {
+					memoryContext := "Relevant information from memory:\n"
+					for _, result := range memoryResults {
+						memoryContext += fmt.Sprintf("- %s\n", result.Text)
+					}
+					a.Messages = append(a.Messages, Message{
+						Role:    "system",
+						Content: memoryContext,
+					})
+				}
+			}
 			response, err = a.LLM.Implementation.ChatCompletion(ctx, a.Messages)
 		}
 
@@ -448,6 +462,22 @@ func (a *Agent) Run(ctx context.Context, query string) (*Response, error) {
 	// Add user message to both conversation histories
 	a.conversationHistory = append(a.conversationHistory, userMessage)
 	a.Messages = append(a.Messages, userMessage)
+
+	// Query memory for relevant information
+	if a.Memory != nil {
+		memoryResults := a.Memory.Search([]float64{}) // Replace with actual query vector if available
+		if len(memoryResults) > 0 {
+			// Add memory results as a system message
+			memoryContext := "Relevant information from memory:\n"
+			for _, result := range memoryResults {
+				memoryContext += fmt.Sprintf("- %s\n", result.Text)
+			}
+			a.Messages = append(a.Messages, Message{
+				Role:    "system",
+				Content: memoryContext,
+			})
+		}
+	}
 
 	// Implement retry logic
 	var response Response

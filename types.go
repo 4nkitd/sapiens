@@ -55,9 +55,10 @@ type Embedding struct {
 }
 
 type SimilarityResult struct {
-	Text      string
-	Score     float64
-	Embedding Embedding
+	Text      string      `json:"text"`
+	Score     float64     `json:"score"`
+	Embedding Embedding   `json:"embedding"`
+	Key       interface{} `json:"key"` // Add the Key field
 }
 
 // LLM defines the basic information for a language model.
@@ -112,6 +113,7 @@ type Agent struct {
 	Context                  map[string]interface{}
 	MetaData                 map[string]interface{}
 	PromptManager            *PromptManager
+	Memory                   *Memory
 }
 
 // SystemPrompt represents a system prompt with content and version

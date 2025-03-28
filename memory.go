@@ -56,7 +56,7 @@ func (m *Memory) cosineSimilarity(vec1, vec2 Vector) float64 {
 func (m *Memory) Search(queryEmbedding Vector) []SimilarityResult {
 	var results []SimilarityResult
 
-	for _, item := range m.Store.Items() {
+	for key, item := range m.Store.Items() { // Iterate with key
 		var storedEmbedding Embedding
 		json.Unmarshal(item.Object.([]byte), &storedEmbedding)
 
@@ -67,6 +67,7 @@ func (m *Memory) Search(queryEmbedding Vector) []SimilarityResult {
 			Text:      storedEmbedding.Text,
 			Score:     float64(similarity),
 			Embedding: storedEmbedding,
+			Key:       key, // Store the key
 		})
 	}
 

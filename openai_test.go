@@ -43,8 +43,6 @@ func GenerateSchema[T any]() *jsonschema.Schema {
 
 func TestOpenAI(t *testing.T) {
 
-	os.Setenv("OPENAI_API_KEY", "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")
-
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
 		t.Skip("Skipping test: OPENAI_API_KEY environment variable not set")

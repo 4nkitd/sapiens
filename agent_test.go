@@ -690,3 +690,123 @@ func TestAgentWithPromptManager(t *testing.T) {
 			updatedExpectedTerms, updatedFoundTerms)
 	}
 }
+
+// Helper function to augment the prompt with memory
+func augmentPromptWithMemory(agent *Agent, llm LLMInterface, prompt string) string {
+	// Generate embedding for the prompt
+	embedding, err := llm.GenerateEmbedding(context.Background(), "gemini-embedding-exp-03-07", prompt, SEMANTIC_SIMILARITY)
+	if err != nil {
+		fmt.Printf("Failed to generate embedding for prompt: %v\n", err)
+		return prompt // Return original prompt on error
+	}
+
+	// Search memory for relevant information
+	results := agent.Memory.Search(embedding.Vector)
+
+	// Append memory results to the prompt
+	for _, result := range results {
+		key, ok := result.Key.(string) // Type assertion
+		if !ok {
+			fmt.Printf("Invalid key type in memory: %T\n", result.Key)
+			continue // Skip this result
+		}
+		value := agent.Memory.Get(key) // Retrieve the value
+		if value != nil {
+			prompt += fmt.Sprintf("\nMemory: key=%s value=%v", key, value) // Add key and value
+		} else {
+			prompt += "\nMemory: " + result.Text // Fallback to text if value is nil
+		}
+	}
+
+	return prompt
+}
+
+func TestAgentMemoryWithGemini(t *testing.T) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping test: GEMINI_API_KEY environment variable not set")
+	}
+
+	// Create a new LLM implementation
+	llmImpl := NewGoogleGenAI(apiKey, "gemini-2.0-flash")
+	err := llmImpl.Initialize()
+	if err != nil {
+		t.Fatalf("Failed to initialize GoogleGenAI: %v", err)
+	}
+
+	// Create a new agent
+	agent := NewAgent("GeminiMemoryAgent", llmImpl, apiKey, "gemini-2.0-flash", "google")
+	agent.AddSystemPrompt("You are a helpful AI assistant who remembers previous parts of the conversation.", "1.0")
+
+	// Create a new memory instance
+	memory := NewMemory("simple", map[string]interface{}{})
+	agent.Memory = &memory
+
+	ctx := context.Background()
+
+	// Information to remember
+	name := "Bob"
+	location := "New York"
+	profession := "software engineer"
+
+	// Generate embeddings for the information
+	embeddingName, err := llmImpl.GenerateEmbedding(ctx, "gemini-embedding-exp-03-07", fmt.Sprintf("My name is %s", name), SEMANTIC_SIMILARITY)
+	if err != nil {
+		t.Fatalf("Failed to generate embedding for name: %v", err)
+	}
+	agent.Memory.Add("name", name, embeddingName)
+
+	embeddingLocation, err := llmImpl.GenerateEmbedding(ctx, "gemini-embedding-exp-03-07", fmt.Sprintf("I live in %s", location), SEMANTIC_SIMILARITY)
+	if err != nil {
+		t.Fatalf("Failed to generate embedding for location: %v", err)
+	}
+	agent.Memory.Add("location", location, embeddingLocation)
+
+	embeddingProfession, err := llmImpl.GenerateEmbedding(ctx, "gemini-embedding-exp-03-07", fmt.Sprintf("I work as a %s", profession), SEMANTIC_SIMILARITY)
+	if err != nil {
+		t.Fatalf("Failed to generate embedding for profession: %v", err)
+	}
+	agent.Memory.Add("profession", profession, embeddingProfession)
+
+	// First follow-up question that requires memory
+	prompt1 := "Where do I live?"
+	augmentedPrompt1 := augmentPromptWithMemory(agent, llmImpl, prompt1)
+	followUpResponse1, err := agent.Run(ctx, augmentedPrompt1)
+	if err != nil {
+		t.Fatalf("First follow-up question failed: %v", err)
+	}
+	t.Logf("First follow-up response: %s", followUpResponse1.Content)
+
+	// Check if the response contains the location
+	if !containsSubstring(followUpResponse1.Content, "New York") {
+		t.Errorf("Expected response to contain 'New York', but got: %s", followUpResponse1.Content)
+	}
+
+	// Second follow-up to test deeper memory
+	prompt2 := "What is my name?"
+	augmentedPrompt2 := augmentPromptWithMemory(agent, llmImpl, prompt2)
+	followUpResponse2, err := agent.Run(ctx, augmentedPrompt2)
+	if err != nil {
+		t.Fatalf("Second follow-up question failed: %v", err)
+	}
+	t.Logf("Second follow-up response: %s", followUpResponse2.Content)
+
+	// Check if the response contains the name
+	if !containsSubstring(followUpResponse2.Content, "Bob") {
+		t.Errorf("Expected response to contain 'Bob', but got: %s", followUpResponse2.Content)
+	}
+
+	// Final memory check
+	prompt3 := "What is my name, where do I live, and what is my profession?"
+	augmentedPrompt3 := augmentPromptWithMemory(agent, llmImpl, prompt3)
+	finalResponse, err := agent.Run(ctx, augmentedPrompt3)
+	if err != nil {
+		t.Fatalf("Final memory check failed: %v", err)
+	}
+	t.Logf("Final memory check response: %s", finalResponse.Content)
+
+	// Check if all information is mentioned
+	if !containsSubstring(finalResponse.Content, "Bob") || !containsSubstring(finalResponse.Content, "New York") || !containsSubstring(finalResponse.Content, "software engineer") {
+		t.Errorf("Expected response to contain 'Bob', 'New York', and 'software engineer', but got: %s", finalResponse.Content)
+	}
+}

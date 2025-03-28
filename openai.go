@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	openai "github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
 )
 
 // OpenAI implements the LLMInterface for OpenAI
@@ -32,8 +31,8 @@ func NewOpenAI(apiKey string, modelName string) *OpenAI {
 // Initialize sets up the OpenAI client
 func (o *OpenAI) Initialize() error {
 	o.Client = openai.NewClient(
-		option.WithBaseURL("https://models.inference.ai.azure.com"), // defaults to https://api.openai.com
-		option.WithAPIKey(o.APIKey),                                 // defaults to os.LookupEnv("OPENAI_API_KEY")
+	// option.WithBaseURL("https://models.inference.ai.azure.com"), // defaults to https://api.openai.com
+	// option.WithAPIKey(o.APIKey),                                 // defaults to os.LookupEnv("OPENAI_API_KEY")
 	)
 	return nil
 }
