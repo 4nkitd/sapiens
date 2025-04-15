@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -397,6 +398,7 @@ func (a *Agent) executeWithStructure(ctx context.Context) (Response, error) {
 
 // ExecuteWithToolsAndStructure processes a request with both tools and structured output
 func (a *Agent) executeWithToolsAndStructure(ctx context.Context, options map[string]interface{}) (Response, error) {
+	// STEP 1: First handle regular tools (excluding structured_output)
 	// Create a filtered tools list excluding the structured_output tool
 	filteredTools := make([]Tool, 0, len(a.Tools))
 	for _, tool := range a.Tools {
@@ -405,22 +407,22 @@ func (a *Agent) executeWithToolsAndStructure(ctx context.Context, options map[st
 		}
 	}
 
-	// Execute with tools first
+	// Execute with regular tools first
 	response, err := a.LLM.Implementation.ChatCompletionWithTools(ctx, a.Messages, filteredTools, options)
 	if err != nil {
 		return Response{}, err
 	}
 
-	// If there are tool calls, process them immediately within this function
-	if len(response.ToolCalls) > 0 {
-		// Add the assistant response to the message history
-		a.Messages = append(a.Messages, Message{
-			Role:      "assistant",
-			Content:   response.Content,
-			ToolCalls: response.ToolCalls,
-		})
+	// Add the assistant response with tool calls to the message history
+	a.Messages = append(a.Messages, Message{
+		Role:      "assistant",
+		Content:   response.Content,
+		ToolCalls: response.ToolCalls,
+	})
 
-		// Process each tool call and add results to the conversation
+	// STEP 2: Process tool results if any
+	if len(response.ToolCalls) > 0 {
+		// Process tool calls and add results to conversation
 		for _, toolCall := range response.ToolCalls {
 			implementation, exists := a.toolImplementations[toolCall.Name]
 			if !exists {
@@ -449,55 +451,55 @@ func (a *Agent) executeWithToolsAndStructure(ctx context.Context, options map[st
 				},
 			})
 		}
+	}
 
-		// Now request a structured response directly
-		structuredPrompt := fmt.Sprintf(
-			"Based on the information provided about the weather in Delhi, respond with a JSON object containing these fields: answer (string): a concise summary of the weather information, confidence (number): your confidence in this answer from 0 to 1. ONLY respond with valid JSON.",
-		)
+	// STEP 3: Now request structured output with the updated conversation
+	structuredPrompt := fmt.Sprintf(
+		"Based on the weather information provided, respond with a JSON object containing: location (string), analysis (string), recommendation (string), and confidence (number). ONLY respond with valid JSON.",
+	)
 
-		// Add structured prompt
-		a.Messages = append(a.Messages, Message{
-			Role:    "user",
-			Content: structuredPrompt,
-		})
+	// Add structured prompt
+	a.Messages = append(a.Messages, Message{
+		Role:    "user",
+		Content: structuredPrompt,
+	})
 
-		// Use regular ChatCompletion to avoid MIME type errors
-		structuredResponse, err := a.LLM.Implementation.ChatCompletion(ctx, a.Messages)
-		if err != nil {
-			// Return the original response even if structured part fails
-			a.Messages = a.Messages[:len(a.Messages)-1] // Remove the structured prompt
-			return response, nil
-		}
-
-		// Try to extract JSON from the response
-		var structured interface{}
-		err = json.Unmarshal([]byte(structuredResponse.Content), &structured)
-		if err == nil {
-			// Successfully parsed JSON
-			response.Structured = structured
-			response.Content = structuredResponse.Content
-		}
-
-		// Remove the structured prompt from messages
-		a.Messages = a.Messages[:len(a.Messages)-1]
-
+	// Request structured output
+	structuredResponse, err := a.LLM.Implementation.ChatCompletion(ctx, a.Messages)
+	if err != nil {
+		// If structured request fails, return original response
+		a.Messages = a.Messages[:len(a.Messages)-1] // Remove the structured prompt
 		return response, nil
 	}
 
-	// If no tool calls, try to get structured response directly
+	// Remove the structured prompt from messages
+	a.Messages = a.Messages[:len(a.Messages)-1]
+
+	// Try to parse JSON from the structured response
 	var structured interface{}
-	err = json.Unmarshal([]byte(response.Content), &structured)
+	err = json.Unmarshal([]byte(structuredResponse.Content), &structured)
 	if err == nil {
+		// Successfully parsed structured data
 		response.Structured = structured
-		return response, nil
-	}
-
-	// If we reached here, we need to explicitly request a structured response
-	structuredResponse, err := a.executeWithStructure(ctx)
-	if err == nil {
-		response.Structured = structuredResponse.Structured
-		if response.Content == "" {
-			response.Content = structuredResponse.Content
+		response.Content = structuredResponse.Content
+	} else {
+		// Fallback: try to extract JSON from the content if it's wrapped in code blocks
+		content := structuredResponse.Content
+		if strings.Contains(content, "```json") {
+			// Extract JSON from code block
+			jsonStart := strings.Index(content, "```json")
+			if jsonStart >= 0 {
+				jsonStart = jsonStart + 7 // Move past ```json
+				jsonEnd := strings.Index(content[jsonStart:], "```")
+				if jsonEnd >= 0 {
+					jsonContent := content[jsonStart : jsonStart+jsonEnd]
+					jsonContent = strings.TrimSpace(jsonContent)
+					err = json.Unmarshal([]byte(jsonContent), &structured)
+					if err == nil {
+						response.Structured = structured
+					}
+				}
+			}
 		}
 	}
 

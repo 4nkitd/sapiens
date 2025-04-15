@@ -810,3 +810,165 @@ func TestAgentMemoryWithGemini(t *testing.T) {
 		t.Errorf("Expected response to contain 'Bob', 'New York', and 'software engineer', but got: %s", finalResponse.Content)
 	}
 }
+
+func TestAgentWithStructuredAndToolCalls(t *testing.T) {
+	apiKey := os.Getenv("GEMINI_API_KEY")
+	if apiKey == "" {
+		t.Skip("Skipping test: GEMINI_API_KEY environment variable not set")
+	}
+
+	// Create a new LLM implementation
+	llmImpl := NewGoogleGenAI(apiKey, "gemini-2.0-flash")
+	err := llmImpl.Initialize()
+	if err != nil {
+		t.Fatalf("Failed to initialize GoogleGenAI: %v", err)
+	}
+
+	// Create a new agent
+	agent := NewAgent("CombinedAgent", llmImpl, apiKey, "gemini-2.0-flash", "google")
+	agent.AddSystemPrompt("You are a helpful AI assistant that provides accurate responses in structured format and can use tools.", "1.0")
+
+	// Define structured response schema
+	schema := Schema{
+		Type: "object",
+		Properties: map[string]Schema{
+			"location": {
+				Type:        "string",
+				Description: "The location the user asked about",
+			},
+			"analysis": {
+				Type:        "string",
+				Description: "Analysis of the weather conditions",
+			},
+			"recommendation": {
+				Type:        "string",
+				Description: "Recommendation based on the weather",
+			},
+			"confidence": {
+				Type:        "number",
+				Description: "Confidence score from 0 to 1",
+			},
+		},
+		Required: []string{"location", "analysis", "recommendation"},
+	}
+
+	// Set structured response schema
+	agent.SetStructuredResponseSchema(schema)
+
+	// Add weather tool
+	weatherTool := Tool{
+		Name:        "get_weather",
+		Description: "Get the current weather for a location",
+		InputSchema: &Schema{
+			Type: "object",
+			Properties: map[string]Schema{
+				"location": {
+					Type:        "string",
+					Description: "The city and state/country",
+				},
+				"unit": {
+					Type:        "string",
+					Description: "Temperature unit (celsius or fahrenheit)",
+					Enum:        []string{"celsius", "fahrenheit"},
+				},
+			},
+			Required: []string{"location"},
+		},
+	}
+
+	agent.AddTools(weatherTool)
+
+	// Register tool implementation
+	agent.RegisterToolImplementation("get_weather", func(params map[string]interface{}) (interface{}, error) {
+		location, ok := params["location"].(string)
+		if !ok {
+			return nil, fmt.Errorf("location must be a string")
+		}
+
+		unit := "celsius"
+		if unitParam, ok := params["unit"].(string); ok {
+			unit = unitParam
+		}
+
+		// Mock weather data
+		weatherInfo := map[string]interface{}{
+			"location":    location,
+			"temperature": 22,
+			"unit":        unit,
+			"condition":   "Partly cloudy",
+			"humidity":    65,
+			"wind_speed":  12,
+		}
+
+		return weatherInfo, nil
+	})
+
+	ctx := context.Background()
+	response, err := agent.Run(ctx, "What's the weather like in Tokyo and what should I wear?")
+	if err != nil {
+		t.Fatalf("Agent.Run with structured output and tools failed: %v", err)
+	}
+
+	// Log the response for debugging
+	t.Logf("Tool calls: %v", response.ToolCalls)
+	t.Logf("Structured: %v", response.Structured)
+	t.Logf("Content: %s", response.Content)
+
+	// Check if we have tool calls
+	if len(response.ToolCalls) == 0 {
+		t.Error("Expected tool calls but got none")
+	}
+
+	// Check if we have a weather tool call
+	foundWeatherTool := false
+	for _, call := range response.ToolCalls {
+		if call.Name == "get_weather" {
+			foundWeatherTool = true
+			break
+		}
+	}
+	if !foundWeatherTool {
+		t.Error("Expected 'get_weather' tool call but didn't find it")
+	}
+
+	// Check if we have structured data
+	if response.Structured == nil {
+		t.Error("Expected structured data but got nil")
+	} else {
+		// Check for required fields in the structured response
+		structMap, ok := response.Structured.(map[string]interface{})
+		if !ok {
+			t.Error("Structured response is not a map")
+		} else {
+			requiredFields := []string{"location", "analysis", "recommendation"}
+			for _, field := range requiredFields {
+				if _, exists := structMap[field]; !exists {
+					t.Errorf("Required field '%s' missing from structured response", field)
+				}
+			}
+
+			// Verify location matches what was asked
+			if loc, exists := structMap["location"]; exists {
+				locStr, ok := loc.(string)
+				if !ok {
+					t.Error("Location field is not a string")
+				} else if !strings.Contains(strings.ToLower(locStr), "tokyo") {
+					t.Errorf("Expected location to contain 'Tokyo', got '%s'", locStr)
+				}
+			}
+		}
+	}
+
+	// Check if the content contains relevant information
+	expectedTerms := []string{"Tokyo", "weather", "wear", "temperature"}
+	foundTerms := 0
+	for _, term := range expectedTerms {
+		if containsSubstring(response.Content, term) {
+			foundTerms++
+		}
+	}
+	if foundTerms < 2 {
+		t.Errorf("Expected response to mention at least 2 terms from %v, but found only %d terms",
+			expectedTerms, foundTerms)
+	}
+}
