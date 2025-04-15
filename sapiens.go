@@ -19,6 +19,8 @@ type LLMInterface interface {
 
 	SetSystemPrompt(prompt SystemPrompt)
 
+	MultimodalCompletion(ctx context.Context, messages []Message) (Response, error)
+
 	Generate(ctx context.Context, request *Request) (*Response, error)
 
 	// Complete generates a completion for the given prompt

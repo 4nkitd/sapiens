@@ -2,9 +2,11 @@ package sapiens
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/google/generative-ai-go/genai" // Import OpenAI
@@ -635,5 +637,94 @@ func (g *GoogleGenAI) StructuredOutput(ctx context.Context, messages []Message, 
 		Content:    content,
 		Structured: structured,
 		Raw:        resp,
+	}, nil
+}
+
+// MultimodalCompletion processes text and image inputs to generate a response for Gemini
+func (g *GoogleGenAI) MultimodalCompletion(ctx context.Context, messages []Message) (Response, error) {
+	// Initialize Gemini client
+	client, err := genai.NewClient(ctx, option.WithAPIKey(os.Getenv("GEMINI_API_KEY")))
+	if err != nil {
+		return Response{}, fmt.Errorf("failed to create Gemini client: %w", err)
+	}
+	defer client.Close()
+
+	// Select the appropriate model
+	model := client.GenerativeModel("gemini-1.5-flash")
+
+	// Prepare request parts
+	var parts []genai.Part
+
+	// Add system prompt if available
+	if g.SystemPrompt.Content != "" {
+		parts = append(parts, genai.Text(g.SystemPrompt.Content))
+	}
+
+	// Process all messages in the conversation
+	for i, msg := range messages {
+		// Skip system messages that were added after initialization
+		if msg.Role == "system" && i != 0 {
+			continue
+		}
+
+		// Handle regular text content
+		if msg.Content != "" {
+			parts = append(parts, genai.Text(msg.Content))
+		}
+
+		// Handle image content if present
+		if msg.Options != nil {
+			if imgData, ok := msg.Options["image"]; ok {
+				if imgMap, ok := imgData.(map[string]interface{}); ok {
+					// Handle different ways image data might be provided
+					if data, ok := imgMap["data"].([]byte); ok {
+						// Raw image data
+						mimeType := "image/jpeg" // Default
+						if mt, ok := imgMap["mime_type"].(string); ok {
+							mimeType = mt
+						}
+						parts = append(parts, genai.ImageData(mimeType, data))
+					} else if base64Data, ok := imgMap["data"].(string); ok {
+						// Base64 encoded image data
+						data, err := base64.StdEncoding.DecodeString(base64Data)
+						if err != nil {
+							return Response{}, fmt.Errorf("failed to decode base64 image: %w", err)
+						}
+
+						mimeType := "image/jpeg" // Default
+						if mt, ok := imgMap["mime_type"].(string); ok {
+							mimeType = mt
+						}
+						parts = append(parts, genai.ImageData(mimeType, data))
+					}
+				}
+			}
+		}
+	}
+
+	// Ensure we have at least one part
+	if len(parts) == 0 {
+		return Response{}, fmt.Errorf("no content to send to Gemini")
+	}
+
+	// Generate content
+	resp, err := model.GenerateContent(ctx, parts...)
+	if err != nil {
+		return Response{}, fmt.Errorf("Gemini API error: %w", err)
+	}
+
+	// Extract response text
+	content := ""
+	if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
+		for _, part := range resp.Candidates[0].Content.Parts {
+			if text, ok := part.(genai.Text); ok {
+				content += string(text)
+			}
+		}
+	}
+
+	return Response{
+		Content: content,
+		Raw:     resp,
 	}, nil
 }

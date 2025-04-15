@@ -152,6 +152,71 @@ func (a *Agent) RegisterToolImplementation(toolName string, implementation ToolI
 	a.toolImplementations[toolName] = implementation
 }
 
+// AddImageContent adds image data to the agent's messages
+func (a *Agent) AddImageContent(imageData []byte, mimeType string) {
+	// Create a message with image content
+	imageMessage := Message{
+		Role: "user",
+		Options: map[string]interface{}{
+			"image": map[string]interface{}{
+				"data":      imageData,
+				"mime_type": mimeType,
+			},
+		},
+	}
+
+	// Add the image message to both conversation histories
+	a.conversationHistory = append(a.conversationHistory, imageMessage)
+	a.Messages = append(a.Messages, imageMessage)
+}
+
+// RunWithImageQuery processes a user query with image data and returns a response
+func (a *Agent) RunWithImageQuery(ctx context.Context, query string, imageData []byte, mimeType string) (*Response, error) {
+	// Add the image content first
+	a.AddImageContent(imageData, mimeType)
+
+	// Then add the text query and process the request
+	return a.Run(ctx, query)
+}
+
+// executeWithMultimodal processes a request with multimodal content
+func (a *Agent) executeWithMultimodal(ctx context.Context) (Response, error) {
+	// Implement retry logic
+	var response Response
+	var err error
+	var attempts int
+
+	for attempts = 0; attempts < a.MaxRetry; attempts++ {
+		// Use LLM implementation's multimodal capability if available
+		response, err = a.LLM.Implementation.MultimodalCompletion(ctx, a.Messages)
+		if err == nil {
+			break // Success, exit retry loop
+		}
+
+		// Log retry attempt
+		fmt.Printf("executeWithMultimodal failed (attempt %d/%d): %v\n",
+			attempts+1, a.MaxRetry, err)
+
+		// Optional: Add backoff delay between retries
+		if attempts < a.MaxRetry-1 {
+			time.Sleep(time.Duration(500*(attempts+1)) * time.Millisecond)
+		}
+	}
+
+	// If all retries failed
+	if err != nil {
+		return Response{}, fmt.Errorf("executeWithMultimodal failed after %d attempts: %w", attempts, err)
+	}
+
+	// Add the assistant response to the message history
+	a.Messages = append(a.Messages, Message{
+		Role:    "assistant",
+		Content: response.Content,
+	})
+
+	return response, nil
+}
+
 // ExecuteLLM processes the current agent state through the LLM and returns a response.
 func (a *Agent) ExecuteLLM(ctx context.Context) (Response, error) {
 	if a.LLM == nil || a.LLM.Implementation == nil {
@@ -167,8 +232,21 @@ func (a *Agent) ExecuteLLM(ctx context.Context) (Response, error) {
 	var attempts int
 
 	for attempts = 0; attempts < a.MaxRetry; attempts++ {
+		// Check if there's image content in any of the messages
+		hasImageContent := false
+		for _, msg := range a.Messages {
+			if msg.Options != nil {
+				if _, ok := msg.Options["image"]; ok {
+					hasImageContent = true
+					break
+				}
+			}
+		}
+
 		// Logic fork based on capabilities needed
-		if len(a.Tools) > 0 && a.StructuredResponseSchema.Type != "" {
+		if hasImageContent {
+			response, err = a.executeWithMultimodal(ctx)
+		} else if len(a.Tools) > 0 && a.StructuredResponseSchema.Type != "" {
 			response, err = a.executeWithToolsAndStructure(ctx, options)
 		} else if len(a.Tools) > 0 {
 			response, err = a.executeWithTools(ctx, options)

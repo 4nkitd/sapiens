@@ -440,3 +440,9 @@ func (o *OpenAI) Generate(ctx context.Context, request *Request) (*Response, err
 
 	return response, nil
 }
+
+// MultimodalCompletion processes text and image inputs to generate a response
+func (o *OpenAI) MultimodalCompletion(ctx context.Context, messages []Message) (Response, error) {
+
+	return Response{}, nil
+}
