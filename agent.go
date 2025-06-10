@@ -1,4 +1,4 @@
-package main
+package sapiens
 
 import (
 	"context"
@@ -96,7 +96,7 @@ func (a *Agent) ParseResponse(agent_response openai.ChatCompletionResponse, defi
 	if len(agent_response.Choices) == 0 {
 		return fmt.Errorf("no choices in response")
 	}
-	
+
 	return json.Unmarshal([]byte(agent_response.Choices[0].Message.Content), &defined_schema)
 }
 
@@ -147,8 +147,6 @@ func (a *Agent) AskAi(ctx context.Context) (openai.ChatCompletionResponse, error
 	a.Request.Messages = a.MessagesHistory
 	a.mu.Unlock()
 
-
-
 	responseStr, responseErr := a.Llm.CreateChatCompletion(
 		ctx, // Fixed: Use the passed context parameter
 		a.Request,
@@ -183,9 +181,6 @@ func (a *Agent) ToolCalls(response openai.ChatCompletionResponse) (*openai.ChatC
 	if a.currentDepth >= a.maxToolCallDepth {
 		return nil, fmt.Errorf("maximum tool call depth (%d) exceeded", a.maxToolCallDepth)
 	}
-
-
-
 
 	var toolResponses []AToolCallResp
 	var totalToolExecCount int = 0
