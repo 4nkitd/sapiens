@@ -1,4 +1,4 @@
-package main
+package sapiens
 
 import openai "github.com/sashabaranov/go-openai"
 

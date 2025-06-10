@@ -22,7 +22,7 @@ go get github.com/4nkitd/sapiens
 ### Basic Usage
 
 ```go
-package main
+package sapiens
 
 import (
     "context"
@@ -64,7 +64,7 @@ func main() {
 Tools allow your agent to perform specific functions:
 
 ```go
-package main
+package sapiens
 
 import (
     "context"
@@ -126,7 +126,7 @@ func main() {
 Request structured responses using JSON schemas:
 
 ```go
-package main
+package sapiens
 
 import (
     "context"
