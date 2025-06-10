@@ -12,7 +12,7 @@ import (
 
 func TestMCP(t *testing.T) {
 
-	mcp_sse_url := "https://mcp.kite.trade/sse"
+	mcp_sse_url := "http://localhost:8080/sse"
 
 	mcp_server_transport, mcp_server_transport_err := mcp_transport.NewSSE(mcp_sse_url)
 	if mcp_server_transport_err != nil {
