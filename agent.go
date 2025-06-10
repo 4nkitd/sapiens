@@ -18,6 +18,12 @@ type AgentTool struct {
 	ToolFunction   AgentFunc
 }
 
+type AToolCallResp struct {
+	Name     string
+	Id       string
+	Response string
+}
+
 type Agent struct {
 	MessagesHistory          []openai.ChatCompletionMessage
 	Context                  context.Context
@@ -69,6 +75,10 @@ func (a *Agent) AddTool(name, description string, tool_parameters map[string]jso
 	a.mu.Unlock()
 
 	return nil
+}
+
+func (a *Agent) AddMCP(url string, customHeaders map[string]string) {
+
 }
 
 func (a *Agent) SetResponseSchema(name, description string, strict bool, defined_schema interface{}) *openai.ChatCompletionResponseFormat {
@@ -168,12 +178,6 @@ func (a *Agent) AskAi(ctx context.Context) (openai.ChatCompletionResponse, error
 	}
 
 	return responseStr, responseErr
-}
-
-type AToolCallResp struct {
-	Name     string
-	Id       string
-	Response string
 }
 
 func (a *Agent) ToolCalls(response openai.ChatCompletionResponse) (*openai.ChatCompletionResponse, error) {
