@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/sashabaranov/go-openai/jsonschema"
 )
@@ -138,34 +137,7 @@ func TestAgentMultipleTools(t *testing.T) {
 				format = "24hour"
 			}
 
-			fmt.Printf("Time Tool - Location: %s, Format: %s\n", location, format)
-
-			// Simulate different times for different locations
-			now := time.Now()
-			var locationTime time.Time
-
-			switch location {
-			case "New York":
-				locationTime = now.UTC().Add(-5 * time.Hour) // EST
-			case "Tokyo":
-				locationTime = now.UTC().Add(9 * time.Hour) // JST
-			case "London":
-				locationTime = now.UTC() // GMT
-			case "Delhi":
-				locationTime = now.UTC().Add(5*time.Hour + 30*time.Minute) // IST
-			default:
-				locationTime = now.UTC()
-			}
-
-			var timeStr string
-			if format == "12hour" {
-				timeStr = locationTime.Format("3:04 PM")
-			} else {
-				timeStr = locationTime.Format("15:04")
-			}
-
-			return fmt.Sprintf(`{"location":"%s", "time":"%s", "date":"%s", "timezone":"%s", "format":"%s"}`,
-				location, timeStr, locationTime.Format("2006-01-02"), locationTime.Format("MST"), format)
+			return fmt.Sprintf("Time Tool - Location: %s, Format: %s\n", location, format)
 		})
 
 	// Test scenarios

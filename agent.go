@@ -195,8 +195,6 @@ func (a *Agent) Ask(user_messages []openai.ChatCompletionMessage) (response open
 
 	a.Request = requestData
 
-	fmt.Printf("%+v", a.Request)
-
 	return a.AskAi(a.Context)
 }
 
