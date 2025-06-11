@@ -7,6 +7,7 @@ import (
 	"log"
 	"sync"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	openai "github.com/sashabaranov/go-openai"
 	"github.com/sashabaranov/go-openai/jsonschema"
 )
@@ -32,6 +33,8 @@ type Agent struct {
 	SystemPrompt             string
 	StructuredResponseSchema *openai.ChatCompletionResponseFormat
 	Tools                    []AgentTool
+	McpClient                *McpClient
+	McpTools                 []mcp.Tool
 	Request                  openai.ChatCompletionRequest
 	mu                       sync.Mutex
 	maxToolCallDepth         int
@@ -77,8 +80,24 @@ func (a *Agent) AddTool(name, description string, tool_parameters map[string]jso
 	return nil
 }
 
-func (a *Agent) AddMCP(url string, customHeaders map[string]string) {
+func (a *Agent) AddMCP(url string, customHeaders map[string]string) error {
+	mcpClient, err := NewMcpClient(a.Context, url)
+	if err != nil {
+		return fmt.Errorf("failed to create MCP client: %w", err)
+	}
 
+	// Get available tools from MCP server
+	toolsResult, err := mcpClient.ListTools()
+	if err != nil {
+		return fmt.Errorf("failed to list MCP tools: %w", err)
+	}
+
+	a.mu.Lock()
+	a.McpClient = mcpClient
+	a.McpTools = toolsResult.Tools
+	a.mu.Unlock()
+
+	return nil
 }
 
 func (a *Agent) SetResponseSchema(name, description string, strict bool, defined_schema interface{}) *openai.ChatCompletionResponseFormat {
@@ -134,13 +153,40 @@ func (a *Agent) Ask(user_messages []openai.ChatCompletionMessage) (response open
 		requestData.ResponseFormat = a.StructuredResponseSchema
 	}
 
-	if len(a.Tools) > 0 {
+	if len(a.Tools) > 0 || len(a.McpTools) > 0 {
 		var openaiTools []openai.Tool
 
 		a.mu.Lock()
+		// Add regular tools
 		for _, tool := range a.Tools {
-			// Fixed: Use the tool definition directly instead of reconstructing
 			openaiTools = append(openaiTools, tool.ToolDefinition)
+		}
+
+		// Add MCP tools converted to OpenAI format
+		for _, mcpTool := range a.McpTools {
+			parsedProperties := a.McpClient.ParseToolDefinition(mcpTool.InputSchema)
+
+			// Extract required fields from the MCP tool schema
+			var requiredFields []string
+			if mcpTool.InputSchema.Required != nil {
+				for _, req := range mcpTool.InputSchema.Required {
+					requiredFields = append(requiredFields, req)
+				}
+			}
+
+			openaiTool := openai.Tool{
+				Type: openai.ToolTypeFunction,
+				Function: &openai.FunctionDefinition{
+					Name:        mcpTool.Name,
+					Description: mcpTool.Description,
+					Parameters: jsonschema.Definition{
+						Type:       jsonschema.Object,
+						Properties: parsedProperties,
+						Required:   requiredFields,
+					},
+				},
+			}
+			openaiTools = append(openaiTools, openaiTool)
 		}
 		a.mu.Unlock()
 
@@ -148,6 +194,8 @@ func (a *Agent) Ask(user_messages []openai.ChatCompletionMessage) (response open
 	}
 
 	a.Request = requestData
+
+	fmt.Printf("%+v", a.Request)
 
 	return a.AskAi(a.Context)
 }
@@ -195,25 +243,59 @@ func (a *Agent) ToolCalls(response openai.ChatCompletionResponse) (*openai.ChatC
 			// Don't add assistant message with tool calls for Gemini compatibility
 
 			for _, toolCall := range choice.Message.ToolCalls {
+				// First try to find regular tool
 				toolInst, toolInsErr := a.GetToolByName(toolCall.Function.Name)
-				if toolInsErr != nil {
-					// Fixed: Handle tool not found error properly
-					return nil, fmt.Errorf("tool '%s' not found: %w", toolCall.Function.Name, toolInsErr)
+				if toolInsErr == nil {
+					// Regular tool found
+					var parsedParams map[string]string
+					if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &parsedParams); err != nil {
+						return nil, fmt.Errorf("failed to parse tool arguments for '%s': %w", toolCall.Function.Name, err)
+					}
+
+					toolResponse := toolInst.ToolFunction(parsedParams)
+
+					toolResponses = append(toolResponses, AToolCallResp{
+						Response: toolResponse,
+						Id:       toolCall.ID,
+						Name:     toolCall.Function.Name,
+					})
+				} else {
+					// Try MCP tool
+					mcpTool, mcpErr := a.GetMcpToolByName(toolCall.Function.Name)
+					if mcpErr != nil {
+						return nil, fmt.Errorf("tool '%s' not found in regular or MCP tools: %w", toolCall.Function.Name, mcpErr)
+					}
+
+					// Parse arguments as generic map for MCP
+					var parsedArgs map[string]interface{}
+					if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &parsedArgs); err != nil {
+						return nil, fmt.Errorf("failed to parse MCP tool arguments for '%s': %w", toolCall.Function.Name, err)
+					}
+
+					// Call MCP tool
+					mcpResult, mcpCallErr := a.McpClient.CallTool(mcp.CallToolParams{
+						Name:      mcpTool.Name,
+						Arguments: parsedArgs,
+					})
+
+					if mcpCallErr != nil {
+						return nil, fmt.Errorf("MCP tool call failed for '%s': %w", toolCall.Function.Name, mcpCallErr)
+					}
+
+					// Convert MCP result to string
+					var toolResponse string
+					if len(mcpResult.Content) > 0 {
+						toolResponse = fmt.Sprintf("%v", mcpResult.Content[0])
+					} else {
+						toolResponse = "MCP tool executed successfully"
+					}
+
+					toolResponses = append(toolResponses, AToolCallResp{
+						Response: toolResponse,
+						Id:       toolCall.ID,
+						Name:     toolCall.Function.Name,
+					})
 				}
-
-				var parsedParams map[string]string
-				// Fixed: Handle JSON unmarshal error
-				if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &parsedParams); err != nil {
-					return nil, fmt.Errorf("failed to parse tool arguments for '%s': %w", toolCall.Function.Name, err)
-				}
-
-				toolResponse := toolInst.ToolFunction(parsedParams)
-
-				toolResponses = append(toolResponses, AToolCallResp{
-					Response: toolResponse,
-					Id:       toolCall.ID,
-					Name:     toolCall.Function.Name,
-				})
 
 				totalToolExecCount++
 			}
@@ -258,4 +340,17 @@ func (a *Agent) GetToolByName(name string) (AgentTool, error) {
 	}
 
 	return AgentTool{}, fmt.Errorf("tool not found")
+}
+
+func (a *Agent) GetMcpToolByName(name string) (mcp.Tool, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	for _, tool := range a.McpTools {
+		if tool.Name == name {
+			return tool, nil
+		}
+	}
+
+	return mcp.Tool{}, fmt.Errorf("MCP tool not found")
 }
