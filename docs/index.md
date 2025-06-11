@@ -9,7 +9,7 @@ Sapiens provides a simple API for creating AI agents that can work with differen
 ### Basic Example
 
 ```go
-package main
+package sapiens
 
 import (
     "context"
@@ -57,7 +57,7 @@ Sapiens supports multiple [LLM providers](llm.md):
 - Ollama (local models)
 
 ### Tools
-[Tools](tool.md) extend agent capabilities by allowing them to perform specific functions like API calls, calculations, or data retrieval.
+[Tools](tool.md) extend agent capabilities by allowing them to perform specific functions like API calls, calculations, or data retrieval. Includes support for both regular tools and MCP (Model Context Protocol) servers.
 
 ### Messages
 The [Messages](message.md) system provides utilities for creating and managing conversation messages.
@@ -80,6 +80,19 @@ llm := NewAnthropic(os.Getenv("ANTHROPIC_API_KEY"))
 
 // Ollama
 llm := NewOllama("http://localhost:11434/v1/", "", "llama2")
+```
+
+### MCP (Model Context Protocol) Support
+```go
+// Connect to MCP server for external tools
+err := agent.AddMCP("http://localhost:8080/sse", nil)
+if err != nil {
+    log.Printf("MCP connection failed: %v", err)
+}
+
+// Agent automatically uses both regular and MCP tools
+fmt.Printf("Agent has %d regular tools and %d MCP tools\n", 
+    len(agent.Tools), len(agent.McpTools))
 ```
 
 ### Tool Integration
@@ -133,6 +146,7 @@ The Agent orchestrates:
 |-----------|---------|---------|
 | `NewAgent()` | Create an agent | `NewAgent(ctx, client, model, prompt)` |
 | `AddTool()` | Add tool capability | `agent.AddTool(name, desc, params, required, func)` |
+| `AddMCP()` | Connect to MCP server | `agent.AddMCP("http://localhost:8080/sse", nil)` |
 | `SetResponseSchema()` | Enable structured output | `agent.SetResponseSchema(name, desc, strict, schema)` |
 | `Ask()` | Send messages | `agent.Ask(messages)` |
 | `NewMessages()` | Message builder | `msg := NewMessages()` |
@@ -140,9 +154,9 @@ The Agent orchestrates:
 ## Next Steps
 
 1. **[Set up your first agent](agent.md#creation)** - Learn how to create and configure agents
-2. **[Add tools](tool.md)** - Extend agent capabilities with custom functions
+2. **[Add tools](tool.md)** - Extend agent capabilities with custom functions and MCP servers
 3. **[Use structured outputs](schema.md)** - Get structured data instead of plain text
-4. **[Explore examples](examples.md)** - See real-world usage patterns
+4. **[Explore examples](examples.md)** - See real-world usage patterns including MCP integration
 
 ## API Documentation
 

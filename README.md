@@ -6,6 +6,7 @@ A simple and powerful Go library for building AI agents with multi-LLM provider 
 
 - **Multi-LLM Provider Support**: OpenAI, Google Gemini, Anthropic Claude, and Ollama
 - **Tool/Function Calling**: Add custom tools that agents can use
+- **MCP (Model Context Protocol) Support**: Connect to MCP servers for external tool integration
 - **Structured Outputs**: Define JSON schemas for structured responses
 - **Conversation History**: Automatic message history management
 - **Thread-Safe**: Concurrent operations with proper synchronization
@@ -111,6 +112,51 @@ func main() {
     message := NewMessages()
     resp, err := agent.Ask(message.MergeMessages(
         message.UserMessage("What's the weather in London?"),
+    ))
+
+    if err != nil {
+        log.Fatalf("Error: %v", err)
+    }
+
+    fmt.Println("Response:", resp.Choices[0].Message.Content)
+}
+```
+
+### MCP (Model Context Protocol) Integration
+
+Connect to MCP servers to use external tools and services:
+
+```go
+package sapiens
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "os"
+)
+
+func main() {
+    llm := NewGemini(os.Getenv("GEMINI_API_KEY"))
+    agent := NewAgent(
+        context.Background(),
+        llm.Client(),
+        llm.GetDefaultModel(),
+        "You are a helpful assistant with access to MCP tools",
+    )
+
+    // Connect to MCP server
+    err := agent.AddMCP("http://localhost:8080/sse", nil)
+    if err != nil {
+        log.Fatalf("Failed to connect to MCP server: %v", err)
+    }
+
+    fmt.Printf("Agent has %d regular tools and %d MCP tools\n", 
+        len(agent.Tools), len(agent.McpTools))
+
+    message := NewMessages()
+    resp, err := agent.Ask(message.MergeMessages(
+        message.UserMessage("Use the available tools to help me create a payment link"),
     ))
 
     if err != nil {
@@ -241,6 +287,14 @@ Adds a tool that the agent can use.
 - `required`: Required parameter names
 - `callback`: Function to execute when tool is called
 
+#### `AddMCP(url, headers) error`
+
+Connects to an MCP server to use external tools.
+
+**Parameters:**
+- `url`: MCP server URL (typically SSE endpoint)
+- `headers`: Optional custom headers for authentication
+
 #### `SetResponseSchema(name, description, strict, schema) *ResponseFormat`
 
 Sets up structured output schema.
@@ -285,17 +339,30 @@ Combines multiple messages into a slice.
 
 ### Multiple Tools
 
-You can add multiple tools to an agent:
+You can add multiple tools to an agent, including both regular tools and MCP tools:
 
 ```go
-// Add weather tool
+// Add regular weather tool
 agent.AddTool("get_weather", "Get weather info", weatherParams, []string{"location"}, weatherFunc)
 
-// Add currency tool
+// Add regular currency tool
 agent.AddTool("convert_currency", "Convert currency", currencyParams, []string{"amount", "from", "to"}, currencyFunc)
 
-// The agent will automatically choose which tools to use
+// Connect to MCP server for additional tools
+agent.AddMCP("http://localhost:8080/sse", nil)
+
+// The agent will automatically choose which tools to use (regular or MCP)
 ```
+
+### MCP Tool Integration
+
+MCP tools are automatically integrated alongside regular tools:
+- MCP server tools are discovered automatically
+- Tool schemas are converted to OpenAI-compatible format
+- Agents can seamlessly use both regular and MCP tools
+- MCP tool calls are handled transparently
+
+For detailed MCP setup instructions, see [MCP_SETUP.md](MCP_SETUP.md).
 
 ### Tool Call Recursion Protection
 
@@ -307,10 +374,14 @@ All agent operations are thread-safe and can be used concurrently.
 
 ## Examples
 
-See the test files for more examples:
+See the test files and examples for more usage patterns:
 - `agent_ask_test.go` - Basic agent usage with tools
 - `agent_multiple_tools_test.go` - Multiple tool integration
 - `agent_structured_resp_test.go` - Structured response handling
+- `mcp_test.go` - MCP server integration testing
+- `examples/mcp.go` - Complete MCP usage example
+
+For comprehensive MCP setup and examples, see [MCP_SETUP.md](MCP_SETUP.md).
 
 ## Environment Variables
 
@@ -325,6 +396,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key"
 ## Dependencies
 
 - `github.com/sashabaranov/go-openai` - OpenAI Go client (used for all providers)
+- `github.com/mark3labs/mcp-go` - Model Context Protocol client for MCP server integration
 
 ## Contributing
 

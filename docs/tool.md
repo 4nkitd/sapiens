@@ -1,18 +1,23 @@
 # Tools
 
-Tools extend the agent's capabilities by allowing it to call external functions, APIs, or perform specific computations. Sapiens provides a simple yet powerful tool system that integrates seamlessly with all supported LLM providers.
+Tools extend the agent's capabilities by allowing it to call external functions, APIs, or perform specific computations. Sapiens provides a simple yet powerful tool system that integrates seamlessly with all supported LLM providers and includes support for MCP (Model Context Protocol) servers.
 
 ## Overview
 
 The tool system in Sapiens allows you to:
 - Define custom functions that agents can call
+- Connect to MCP servers for external tool integration
 - Specify parameter schemas with validation
 - Handle tool execution automatically
 - Chain multiple tool calls in a single conversation
 - Prevent infinite recursion with built-in depth limits
+- Seamlessly mix regular tools and MCP tools
 
-## Tool Structure
+## Tool Types
 
+Sapiens supports two types of tools:
+
+### Regular Tools
 ```go
 type AgentTool struct {
     ToolDefinition openai.Tool
@@ -22,13 +27,30 @@ type AgentTool struct {
 type AgentFunc func(parameters map[string]string) string
 ```
 
-Tools consist of:
+Regular tools consist of:
 - **ToolDefinition**: OpenAI-compatible tool definition with schema
 - **ToolFunction**: Your implementation function that gets called
 
+### MCP Tools
+```go
+type McpClient struct {
+    Ctx       context.Context
+    BaseUrl   string
+    Client    *mcp_client.Client
+    Connected bool
+    Tools     []mcp.Tool
+}
+```
+
+MCP tools are:
+- **External tools**: Hosted on MCP servers
+- **Protocol-based**: Use Model Context Protocol for communication
+- **Auto-discovered**: Tool schemas are fetched from the server
+- **Seamlessly integrated**: Work alongside regular tools
+
 ## Adding Tools to an Agent
 
-### Basic Tool Addition
+### Regular Tool Addition
 
 ```go
 func (a *Agent) AddTool(
@@ -47,7 +69,19 @@ func (a *Agent) AddTool(
 - `required_params`: List of required parameter names
 - `funx`: Function that implements the tool logic
 
-### Simple Example
+### MCP Server Connection
+
+```go
+func (a *Agent) AddMCP(url string, customHeaders map[string]string) error
+```
+
+**Parameters:**
+- `url`: MCP server URL (typically an SSE endpoint like `http://localhost:8080/sse`)
+- `customHeaders`: Optional custom headers for authentication or configuration
+
+MCP servers automatically provide their available tools, which are then integrated into the agent.
+
+### Regular Tool Example
 
 ```go
 import "github.com/sashabaranov/go-openai/jsonschema"
@@ -72,6 +106,22 @@ agent.AddTool(
         return fmt.Sprintf(`{"time":"2024-01-15 10:30:00", "timezone":"%s"}`, timezone)
     },
 )
+```
+
+### MCP Server Example
+
+```go
+// Connect to an MCP server that provides payment tools
+err := agent.AddMCP("http://localhost:8080/sse", nil)
+if err != nil {
+    log.Printf("Failed to connect to MCP server: %v", err)
+    return
+}
+
+fmt.Printf("Connected to MCP server. Agent now has %d MCP tools available\n", len(agent.McpTools))
+
+// The agent can now use MCP tools automatically
+// No additional code needed - tools are auto-discovered
 ```
 
 ## Tool Parameter Schemas
@@ -282,31 +332,76 @@ func apiCallTool(parameters map[string]string) string {
 }
 ```
 
-## Multiple Tools
+## Multiple Tools and MCP Integration
 
-You can add multiple tools to a single agent, and the LLM will automatically choose which tools to use:
+You can add multiple tools to a single agent, including both regular tools and MCP tools. The LLM will automatically choose which tools to use:
 
 ```go
-// Add weather tool
+// Add regular tools
 agent.AddTool("get_weather", "Get weather info", weatherParams, []string{"location"}, weatherFunc)
-
-// Add currency tool
 agent.AddTool("convert_currency", "Convert currency", currencyParams, []string{"amount", "from", "to"}, currencyFunc)
-
-// Add time tool
 agent.AddTool("get_time", "Get current time", timeParams, []string{}, timeFunc)
-
-// Add calculation tool
 agent.AddTool("calculate", "Perform math calculations", calcParams, []string{"expression"}, calcFunc)
+
+// Add MCP server tools
+err := agent.AddMCP("http://localhost:8080/sse", nil)
+if err != nil {
+    log.Printf("MCP server not available: %v", err)
+}
+
+// Connect to additional MCP servers
+err = agent.AddMCP("http://other-server:9090/sse", map[string]string{
+    "Authorization": "Bearer your-token",
+})
+if err != nil {
+    log.Printf("Second MCP server not available: %v", err)
+}
 ```
 
-The agent can then handle complex requests that require multiple tools:
+The agent can then handle complex requests that require multiple tools from different sources:
 
 ```go
 message := NewMessages()
 resp, err := agent.Ask(message.MergeMessages(
-    message.UserMessage("What's the weather in Tokyo and what time is it there? Also convert 100 USD to JPY."),
+    message.UserMessage("What's the weather in Tokyo, what time is it there, convert 100 USD to JPY, and create a payment link for 50 USD"),
 ))
+```
+
+## MCP Tool Discovery and Schema Conversion
+
+When you connect to an MCP server, Sapiens automatically:
+
+1. **Discovers available tools** from the server
+2. **Converts MCP schemas** to OpenAI-compatible tool definitions
+3. **Integrates tools** seamlessly with existing regular tools
+4. **Handles tool calls** transparently
+
+### Schema Conversion Example
+
+```go
+// MCP tool schema (automatically fetched from server)
+mcpTool := mcp.Tool{
+    Name: "createPaymentLink",
+    Description: "Create a payment link",
+    InputSchema: mcp.ToolInputSchema{
+        Type: "object",
+        Properties: map[string]interface{}{
+            "amount": map[string]interface{}{
+                "type": "number",
+                "description": "Payment amount",
+            },
+            "currency": map[string]interface{}{
+                "type": "string",
+                "enum": []string{"USD", "EUR", "GBP"},
+                "description": "Currency code",
+            },
+        },
+        Required: []string{"amount"},
+    },
+}
+
+// Sapiens automatically converts this to OpenAI format
+// No manual conversion needed!
 ```
 
 ## Tool Call Flow
@@ -398,12 +493,12 @@ func TestWeatherTool(t *testing.T) {
 }
 ```
 
-## Complete Example
+## Complete Example with MCP Integration
 
-Here's a complete example with multiple tools:
+Here's a complete example with both regular tools and MCP tools:
 
 ```go
-package main
+package sapiens
 
 import (
     "context"
@@ -422,10 +517,10 @@ func main() {
         context.Background(),
         llm.Client(),
         llm.GetDefaultModel(),
-        "You are a helpful assistant with access to various tools",
+        "You are a helpful assistant with access to various tools including MCP tools",
     )
     
-    // Add weather tool
+    // Add regular weather tool
     agent.AddTool(
         "get_weather",
         "Get current weather for a location",
@@ -439,7 +534,7 @@ func main() {
         },
     )
     
-    // Add time tool
+    // Add regular time tool
     agent.AddTool(
         "get_current_time",
         "Get current time in a timezone",
@@ -456,10 +551,23 @@ func main() {
         },
     )
     
-    // Use the agent
+    // Connect to MCP server for additional tools (e.g., payment tools)
+    err := agent.AddMCP("http://localhost:8080/sse", nil)
+    if err != nil {
+        fmt.Printf("Warning: Could not connect to MCP server: %v\n", err)
+        fmt.Println("Continuing with regular tools only...")
+    } else {
+        fmt.Printf("Successfully connected to MCP server with %d additional tools\n", len(agent.McpTools))
+    }
+    
+    // Display available tools
+    fmt.Printf("Agent has %d regular tools and %d MCP tools\n", 
+        len(agent.Tools), len(agent.McpTools))
+    
+    // Use the agent with mixed tool capabilities
     message := NewMessages()
     resp, err := agent.Ask(message.MergeMessages(
-        message.UserMessage("What's the weather in Paris and what time is it there?"),
+        message.UserMessage("What's the weather in Paris, what time is it there, and create a payment link for 100 USD if possible?"),
     ))
     
     if err != nil {
@@ -470,8 +578,107 @@ func main() {
 }
 ```
 
+## MCP Server Setup
+
+To use MCP tools, you need an MCP server running. Here's a basic example of setting up a simple MCP server:
+
+### Prerequisites
+1. An MCP server implementation (various implementations available)
+2. Server running on accessible URL (e.g., `http://localhost:8080/sse`)
+3. Server exposing tools via MCP protocol
+
+### Testing MCP Connection
+```go
+// Test MCP connection and list available tools
+mcpClient, err := NewMcpClient(context.Background(), "http://localhost:8080/sse")
+if err != nil {
+    log.Printf("MCP connection failed: %v", err)
+    return
+}
+defer mcpClient.Disconnect()
+
+// List available tools
+toolsResult, err := mcpClient.ListTools()
+if err != nil {
+    log.Printf("Failed to list MCP tools: %v", err)
+    return
+}
+
+fmt.Printf("Found %d MCP tools:\n", len(toolsResult.Tools))
+for _, tool := range toolsResult.Tools {
+    fmt.Printf("- %s: %s\n", tool.Name, tool.Description)
+}
+```
+
+## MCP Error Handling
+
+MCP connections can fail for various reasons. Handle them gracefully:
+
+```go
+// Attempt MCP connection with fallback
+err := agent.AddMCP("http://localhost:8080/sse", nil)
+if err != nil {
+    log.Printf("Primary MCP server unavailable: %v", err)
+    
+    // Try backup server
+    err = agent.AddMCP("http://backup-server:8080/sse", nil)
+    if err != nil {
+        log.Printf("Backup MCP server also unavailable: %v", err)
+        log.Println("Continuing with regular tools only")
+    } else {
+        fmt.Println("Connected to backup MCP server")
+    }
+} else {
+    fmt.Println("Connected to primary MCP server")
+}
+```
+
+## MCP Tool Call Flow
+
+1. **Agent analyzes** user request and identifies needed tools
+2. **Tool selection** happens across both regular and MCP tools
+3. **Regular tools** are executed locally via function calls
+4. **MCP tools** are executed via protocol calls to MCP server
+5. **Results are merged** and processed together
+6. **Final response** incorporates results from all tool types
+
+## Advanced MCP Features
+
+### Custom Headers for Authentication
+```go
+// Add custom headers for authenticated MCP servers
+headers := map[string]string{
+    "Authorization": "Bearer your-jwt-token",
+    "X-API-Key":     "your-api-key",
+    "Content-Type":  "application/json",
+}
+
+err := agent.AddMCP("https://secure-mcp-server.com/sse", headers)
+```
+
+### Multiple MCP Servers
+```go
+// Connect to multiple MCP servers for different capabilities
+agent.AddMCP("http://payments-server:8080/sse", nil)      // Payment tools
+agent.AddMCP("http://analytics-server:9090/sse", nil)     // Analytics tools
+agent.AddMCP("http://notifications-server:7070/sse", nil) // Notification tools
+
+// Agent automatically aggregates tools from all servers
+```
+
+### MCP Tool Inspection
+```go
+// Inspect MCP tools after connection
+for _, mcpTool := range agent.McpTools {
+    fmt.Printf("MCP Tool: %s\n", mcpTool.Name)
+    fmt.Printf("Description: %s\n", mcpTool.Description)
+    fmt.Printf("Schema: %+v\n", mcpTool.InputSchema)
+}
+```
+
 ## Related Documentation
 
-- [Agent](agent.md) - Using tools with agents
+- [Agent](agent.md) - Using tools with agents and MCP integration
 - [Schema](schema.md) - JSON schema definitions for tool parameters
-- [Examples](examples.md) - More tool examples and patterns
+- [Examples](examples.md) - More tool examples and MCP patterns
+- [MCP Specification](https://spec.modelcontextprotocol.io/) - Official MCP documentation

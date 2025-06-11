@@ -8,17 +8,18 @@ This document provides practical examples of using Sapiens in real-world scenari
 2. [Weather Assistant](#weather-assistant)
 3. [Task Management System](#task-management-system)
 4. [Multi-Tool Agent](#multi-tool-agent)
-5. [Structured Output Examples](#structured-output-examples)
-6. [Provider Switching](#provider-switching)
-7. [Error Handling Patterns](#error-handling-patterns)
-8. [Advanced Use Cases](#advanced-use-cases)
+5. [MCP (Model Context Protocol) Integration](#mcp-model-context-protocol-integration)
+6. [Structured Output Examples](#structured-output-examples)
+7. [Provider Switching](#provider-switching)
+8. [Error Handling Patterns](#error-handling-patterns)
+9. [Advanced Use Cases](#advanced-use-cases)
 
 ## Basic Agent Setup
 
 ### Simple Question and Answer
 
 ```go
-package main
+package sapiens
 
 import (
     "context"
@@ -88,7 +89,7 @@ func conversationExample() {
 A complete weather assistant with error handling and multiple features.
 
 ```go
-package main
+package sapiens
 
 import (
     "context"
@@ -215,7 +216,7 @@ func main() {
 A comprehensive task management system with multiple tools and structured responses.
 
 ```go
-package main
+package sapiens
 
 import (
     "context"
@@ -441,7 +442,7 @@ func main() {
 An agent that can handle multiple different types of requests with various tools.
 
 ```go
-package main
+package sapiens
 
 import (
     "context"
@@ -698,12 +699,500 @@ func main() {
 }
 ```
 
+## MCP (Model Context Protocol) Integration
+
+Examples of integrating MCP servers to extend agent capabilities with external tools.
+
+### Basic MCP Connection
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "os"
+    
+    "github.com/4nkitd/sapiens"
+)
+
+func main() {
+    // Initialize agent
+    llm := sapiens.NewGemini(os.Getenv("GEMINI_API_KEY"))
+    agent := sapiens.NewAgent(
+        context.Background(),
+        llm.Client(),
+        llm.GetDefaultModel(),
+        "You are a helpful assistant with access to MCP tools",
+    )
+    
+    // Connect to MCP server
+    mcpURL := "http://localhost:8080/sse"
+    err := agent.AddMCP(mcpURL, nil)
+    if err != nil {
+        log.Printf("Warning: Could not connect to MCP server: %v", err)
+        log.Println("Make sure your MCP server is running at", mcpURL)
+        return
+    }
+    
+    fmt.Printf("Successfully connected to MCP server\n")
+    fmt.Printf("Agent has %d regular tools and %d MCP tools\n", 
+        len(agent.Tools), len(agent.McpTools))
+    
+    // List available MCP tools
+    for i, tool := range agent.McpTools {
+        fmt.Printf("%d. %s: %s\n", i+1, tool.Name, tool.Description)
+    }
+    
+    // Use MCP tools
+    message := sapiens.NewMessages()
+    resp, err := agent.Ask(message.MergeMessages(
+        message.UserMessage("Please use any available MCP tools to help me"),
+    ))
+    
+    if err != nil {
+        log.Fatalf("Error: %v", err)
+    }
+    
+    fmt.Println("Response:", resp.Choices[0].Message.Content)
+}
+```
+
+### MCP with Authentication
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "os"
+    
+    "github.com/4nkitd/sapiens"
+)
+
+func main() {
+    llm := sapiens.NewGemini(os.Getenv("GEMINI_API_KEY"))
+    agent := sapiens.NewAgent(
+        context.Background(),
+        llm.Client(),
+        llm.GetDefaultModel(),
+        "You are a secure assistant with authenticated MCP access",
+    )
+    
+    // Connect to authenticated MCP server
+    headers := map[string]string{
+        "Authorization": "Bearer " + os.Getenv("MCP_TOKEN"),
+        "X-API-Key":     os.Getenv("MCP_API_KEY"),
+        "Content-Type":  "application/json",
+    }
+    
+    err := agent.AddMCP("https://secure-mcp-server.com/sse", headers)
+    if err != nil {
+        log.Fatalf("Failed to connect to authenticated MCP server: %v", err)
+    }
+    
+    fmt.Println("Connected to authenticated MCP server")
+    
+    // Use authenticated MCP tools
+    message := sapiens.NewMessages()
+    resp, err := agent.Ask(message.MergeMessages(
+        message.UserMessage("Create a secure payment link for $100"),
+    ))
+    
+    if err != nil {
+        log.Fatalf("Error: %v", err)
+    }
+    
+    fmt.Println("Response:", resp.Choices[0].Message.Content)
+}
+```
+
+### Multiple MCP Servers
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "os"
+    
+    "github.com/4nkitd/sapiens"
+)
+
+func main() {
+    llm := sapiens.NewGemini(os.Getenv("GEMINI_API_KEY"))
+    agent := sapiens.NewAgent(
+        context.Background(),
+        llm.Client(),
+        llm.GetDefaultModel(),
+        "You are an assistant with access to multiple specialized MCP services",
+    )
+    
+    // Connect to payment MCP server
+    err := agent.AddMCP("http://payments-mcp:8080/sse", nil)
+    if err != nil {
+        log.Printf("Payment MCP server not available: %v", err)
+    } else {
+        fmt.Println("Connected to payment MCP server")
+    }
+    
+    // Connect to analytics MCP server
+    analyticsHeaders := map[string]string{
+        "Authorization": "Bearer " + os.Getenv("ANALYTICS_TOKEN"),
+    }
+    err = agent.AddMCP("http://analytics-mcp:9090/sse", analyticsHeaders)
+    if err != nil {
+        log.Printf("Analytics MCP server not available: %v", err)
+    } else {
+        fmt.Println("Connected to analytics MCP server")
+    }
+    
+    // Connect to notifications MCP server
+    err = agent.AddMCP("http://notifications-mcp:7070/sse", nil)
+    if err != nil {
+        log.Printf("Notifications MCP server not available: %v", err)
+    } else {
+        fmt.Println("Connected to notifications MCP server")
+    }
+    
+    fmt.Printf("Total tools available: %d regular + %d MCP\n", 
+        len(agent.Tools), len(agent.McpTools))
+    
+    // Use tools from multiple MCP servers
+    message := sapiens.NewMessages()
+    resp, err := agent.Ask(message.MergeMessages(
+        message.UserMessage("Create a payment link for $50, analyze last month's sales, and send a notification to the team"),
+    ))
+    
+    if err != nil {
+        log.Fatalf("Error: %v", err)
+    }
+    
+    fmt.Println("Response:", resp.Choices[0].Message.Content)
+}
+```
+
+### MCP with Regular Tools
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "os"
+    "time"
+    
+    "github.com/4nkitd/sapiens"
+    "github.com/sashabaranov/go-openai/jsonschema"
+)
+
+func main() {
+    llm := sapiens.NewGemini(os.Getenv("GEMINI_API_KEY"))
+    agent := sapiens.NewAgent(
+        context.Background(),
+        llm.Client(),
+        llm.GetDefaultModel(),
+        "You are a comprehensive assistant with both built-in and external capabilities",
+    )
+    
+    // Add regular tools first
+    err := agent.AddTool(
+        "get_current_time",
+        "Get the current time in any timezone",
+        map[string]jsonschema.Definition{
+            "timezone": {
+                Type:        jsonschema.String,
+                Description: "Timezone (e.g., UTC, EST, PST, Europe/London)",
+            },
+        },
+        []string{}, // timezone is optional
+        func(parameters map[string]string) string {
+            timezone := parameters["timezone"]
+            if timezone == "" {
+                timezone = "UTC"
+            }
+            
+            now := time.Now()
+            return fmt.Sprintf(`{
+                "current_time": "%s",
+                "timezone": "%s",
+                "unix_timestamp": %d,
+                "day_of_week": "%s"
+            }`, now.Format("2006-01-02 15:04:05"), timezone, now.Unix(), now.Weekday())
+        },
+    )
+    if err != nil {
+        log.Printf("Failed to add time tool: %v", err)
+    }
+    
+    err = agent.AddTool(
+        "calculate",
+        "Perform mathematical calculations",
+        map[string]jsonschema.Definition{
+            "expression": {
+                Type:        jsonschema.String,
+                Description: "Mathematical expression to evaluate (e.g., '2 + 2', '10 * 5')",
+            },
+        },
+        []string{"expression"},
+        func(parameters map[string]string) string {
+            expression := parameters["expression"]
+            // Simple calculator implementation (for demo)
+            // In real implementation, use a proper math parser
+            switch expression {
+            case "2 + 2":
+                return `{"result": 4, "expression": "2 + 2"}`
+            case "10 * 5":
+                return `{"result": 50, "expression": "10 * 5"}`
+            default:
+                return fmt.Sprintf(`{"result": "Cannot calculate", "expression": "%s", "error": "Simple demo calculator"}`, expression)
+            }
+        },
+    )
+    if err != nil {
+        log.Printf("Failed to add calculator tool: %v", err)
+    }
+    
+    // Add MCP server tools
+    err = agent.AddMCP("http://localhost:8080/sse", nil)
+    if err != nil {
+        log.Printf("MCP server not available: %v", err)
+        log.Println("Continuing with regular tools only...")
+    } else {
+        fmt.Println("MCP server connected successfully")
+    }
+    
+    fmt.Printf("Agent configuration:\n")
+    fmt.Printf("- Regular tools: %d\n", len(agent.Tools))
+    fmt.Printf("- MCP tools: %d\n", len(agent.McpTools))
+    fmt.Printf("- Total tools: %d\n", len(agent.Tools)+len(agent.McpTools))
+    
+    // Test with a complex request using both tool types
+    message := sapiens.NewMessages()
+    resp, err := agent.Ask(message.MergeMessages(
+        message.UserMessage("What time is it in New York, calculate 15 * 8, and create a payment link for $120 if possible"),
+    ))
+    
+    if err != nil {
+        log.Fatalf("Error: %v", err)
+    }
+    
+    fmt.Println("Response:", resp.Choices[0].Message.Content)
+}
+```
+
+### MCP Error Handling and Fallbacks
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "os"
+    
+    "github.com/4nkitd/sapiens"
+    "github.com/sashabaranov/go-openai/jsonschema"
+)
+
+func main() {
+    llm := sapiens.NewGemini(os.Getenv("GEMINI_API_KEY"))
+    agent := sapiens.NewAgent(
+        context.Background(),
+        llm.Client(),
+        llm.GetDefaultModel(),
+        "You are a resilient assistant that gracefully handles service unavailability",
+    )
+    
+    // Add fallback regular tools
+    err := agent.AddTool(
+        "basic_payment_info",
+        "Provide basic payment information when payment service is unavailable",
+        map[string]jsonschema.Definition{
+            "amount": {
+                Type:        jsonschema.String,
+                Description: "Payment amount",
+            },
+            "currency": {
+                Type:        jsonschema.String,
+                Description: "Currency code (USD, EUR, etc.)",
+            },
+        },
+        []string{"amount"},
+        func(parameters map[string]string) string {
+            amount := parameters["amount"]
+            currency := parameters["currency"]
+            if currency == "" {
+                currency = "USD"
+            }
+            
+            return fmt.Sprintf(`{
+                "message": "Payment service temporarily unavailable",
+                "amount": "%s",
+                "currency": "%s",
+                "instructions": "Please contact support to complete this payment",
+                "support_email": "support@example.com",
+                "fallback": true
+            }`, amount, currency)
+        },
+    )
+    if err != nil {
+        log.Printf("Failed to add fallback payment tool: %v", err)
+    }
+    
+    // Try to connect to primary MCP server
+    primaryMCPURL := "http://payments-mcp:8080/sse"
+    err = agent.AddMCP(primaryMCPURL, nil)
+    if err != nil {
+        log.Printf("Primary MCP server (%s) unavailable: %v", primaryMCPURL, err)
+        
+        // Try backup MCP server
+        backupMCPURL := "http://backup-payments-mcp:8080/sse"
+        err = agent.AddMCP(backupMCPURL, nil)
+        if err != nil {
+            log.Printf("Backup MCP server (%s) also unavailable: %v", backupMCPURL, err)
+            log.Println("Using fallback regular tools only")
+        } else {
+            fmt.Printf("Connected to backup MCP server: %s\n", backupMCPURL)
+        }
+    } else {
+        fmt.Printf("Connected to primary MCP server: %s\n", primaryMCPURL)
+    }
+    
+    // Display available capabilities
+    if len(agent.McpTools) > 0 {
+        fmt.Printf("MCP payment services available (%d tools)\n", len(agent.McpTools))
+    } else {
+        fmt.Printf("Using fallback payment tools (%d tools)\n", len(agent.Tools))
+    }
+    
+    // Test payment functionality with graceful degradation
+    message := sapiens.NewMessages()
+    resp, err := agent.Ask(message.MergeMessages(
+        message.UserMessage("I need to create a payment link for $75 USD"),
+    ))
+    
+    if err != nil {
+        log.Fatalf("Error: %v", err)
+    }
+    
+    fmt.Println("Response:", resp.Choices[0].Message.Content)
+}
+```
+
+### MCP Tool Inspection
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "os"
+    
+    "github.com/4nkitd/sapiens"
+)
+
+func main() {
+    llm := sapiens.NewGemini(os.Getenv("GEMINI_API_KEY"))
+    agent := sapiens.NewAgent(
+        context.Background(),
+        llm.Client(),
+        llm.GetDefaultModel(),
+        "You are a diagnostic assistant for MCP tool inspection",
+    )
+    
+    // Connect to MCP server
+    err := agent.AddMCP("http://localhost:8080/sse", nil)
+    if err != nil {
+        log.Fatalf("Failed to connect to MCP server: %v", err)
+    }
+    
+    fmt.Println("=== MCP Tool Inspection ===")
+    fmt.Printf("Connected to MCP server with %d tools\n\n", len(agent.McpTools))
+    
+    // Inspect each MCP tool
+    for i, tool := range agent.McpTools {
+        fmt.Printf("Tool %d: %s\n", i+1, tool.Name)
+        fmt.Printf("  Description: %s\n", tool.Description)
+        fmt.Printf("  Schema Type: %s\n", tool.InputSchema.Type)
+        
+        if tool.InputSchema.Properties != nil {
+            fmt.Printf("  Parameters:\n")
+            for paramName, paramDef := range tool.InputSchema.Properties {
+                if paramMap, ok := paramDef.(map[string]interface{}); ok {
+                    paramType := "unknown"
+                    paramDesc := "no description"
+                    
+                    if t, exists := paramMap["type"]; exists {
+                        if typeStr, ok := t.(string); ok {
+                            paramType = typeStr
+                        }
+                    }
+                    
+                    if d, exists := paramMap["description"]; exists {
+                        if descStr, ok := d.(string); ok {
+                            paramDesc = descStr
+                        }
+                    }
+                    
+                    required := false
+                    for _, req := range tool.InputSchema.Required {
+                        if req == paramName {
+                            required = true
+                            break
+                        }
+                    }
+                    
+                    requiredStr := ""
+                    if required {
+                        requiredStr = " (required)"
+                    }
+                    
+                    fmt.Printf("    - %s (%s)%s: %s\n", paramName, paramType, requiredStr, paramDesc)
+                }
+            }
+        }
+        
+        if len(tool.InputSchema.Required) > 0 {
+            fmt.Printf("  Required: %v\n", tool.InputSchema.Required)
+        }
+        
+        fmt.Println()
+    }
+    
+    // Test a simple tool call if tools are available
+    if len(agent.McpTools) > 0 {
+        fmt.Println("=== Testing MCP Tool ===")
+        message := sapiens.NewMessages()
+        resp, err := agent.Ask(message.MergeMessages(
+            message.UserMessage("Please use the first available MCP tool with appropriate test data"),
+        ))
+        
+        if err != nil {
+            log.Printf("Error testing MCP tool: %v", err)
+        } else {
+            fmt.Println("Test Response:", resp.Choices[0].Message.Content)
+        }
+    }
+}
+```
+
 ## Structured Output Examples
 
 Examples of using structured responses for different scenarios.
 
 ```go
-package main
+package sapiens
 
 import (
     "context"
@@ -904,7 +1393,7 @@ func main() {
 Example of how to switch between different LLM providers dynamically.
 
 ```go
-package main
+package sapiens
 
 import (
     "context"
@@ -991,7 +1480,7 @@ func main() {
 Comprehensive error handling examples for different scenarios.
 
 ```go
-package main
+package sapiens
 
 import (
     "context"
@@ -1137,7 +1626,7 @@ func main() {
 ### RAG (Retrieval-Augmented Generation) Pattern
 
 ```go
-package main
+package sapiens
 
 import (
     "context"
@@ -1232,7 +1721,7 @@ func main() {
 ### Workflow Automation
 
 ```go
-package main
+package sapiens
 
 import (
     "context"
